@@ -34,7 +34,8 @@ function Ensure-Directory {
 function Write-Utf8NoBom {
     param([string]$Path,[string]$Content)
     Ensure-Directory (Split-Path -Parent $Path)
-    [IO.File]::WriteAllText($Path,$Content,[Text.UTF8Encoding]::new($false))
+    $encoding = New-Object System.Text.UTF8Encoding($false)
+    [IO.File]::WriteAllText($Path,$Content,$encoding)
 }
 
 function Relative-Path {
@@ -68,7 +69,7 @@ function Invoke-HeatMap {
             if (-not $line -or -not $commitDate) { continue }
             $path = $line.Replace('/','\')
             $segments = $path.Split('\')
-            $area = if ($segments.Count -gt 1) { $segments[0] + '\' + $segments[1] } else { $segments[0] }
+            if ($segments.Count -gt 1) { $area = $segments[0] + '\' + $segments[1] } else { $area = $segments[0] }
             $ageDays = [math]::Max(0,($currentDate - $commitDate).TotalDays)
             $recency = [math]::Max(1,30 - [math]::Min(29,[int]$ageDays))
             if (-not $scores.ContainsKey($area)) {
@@ -79,7 +80,11 @@ function Invoke-HeatMap {
             $scores[$area].Score = ($scores[$area].Changes * 3) + $scores[$area].Recency
         }
 
-        $ranked = @($scores.Values | Sort-Object -Property @{Expression='Score';Descending=$true}, @{Expression='Changes';Descending=$true} | Select-Object -First 60)
+        $sortRules = @(
+            @{ Expression = 'Score'; Descending = $true },
+            @{ Expression = 'Changes'; Descending = $true }
+        )
+        $ranked = @($scores.Values | Sort-Object -Property $sortRules | Select-Object -First 60)
         $lines = New-Object Collections.Generic.List[string]
         $lines.Add('# ADOS project heat map')
         $lines.Add('')
@@ -109,11 +114,11 @@ function Invoke-Graph {
         Where-Object { $extensions -contains $_.Extension.ToLowerInvariant() -and $_.FullName -notmatch $excluded -and $_.Length -lt 300000 } |
         Sort-Object FullName | Select-Object -First $Limit)
 
-    $nodes = New-Object Collections.Generic.HashSet[string]
-    $edges = New-Object Collections.Generic.List[object]
+    $nodeMap = @{}
+    $edges = @()
     foreach ($file in $files) {
         $relative = Relative-Path $Root $file.FullName
-        $null = $nodes.Add($relative)
+        $nodeMap[$relative] = $true
         foreach ($line in (Get-Content -LiteralPath $file.FullName -ErrorAction SilentlyContinue)) {
             $target = $null
             if ($line -match '^\s*import\s+.*?from\s+["'']([^"'']+)["'']' -or $line -match '^\s*import\s+["'']([^"'']+)["'']' -or $line -match 'require\(["'']([^"'']+)["'']\)') {
@@ -122,17 +127,16 @@ function Invoke-Graph {
             elseif ($file.Extension -eq '.py' -and ($line -match '^\s*from\s+([A-Za-z0-9_\.]+)\s+import' -or $line -match '^\s*import\s+([A-Za-z0-9_\.]+)')) {
                 $target = $Matches[1]
             }
-            if ($target) {
-                $edges.Add([pscustomobject]@{ Source=$relative; Target=$target })
-            }
+            if ($target) { $edges += [pscustomobject]@{ Source=$relative; Target=$target } }
         }
     }
 
+    $nodes = @($nodeMap.Keys | Sort-Object)
     $payload = [pscustomobject]@{
         generated = (Get-Date -Format o)
         repository = $Root
-        nodes = @($nodes)
-        edges = @($edges)
+        nodes = $nodes
+        edges = $edges
     }
     $jsonPath = Join-Path $Root '.ai\analytics\knowledge-graph.generated.json'
     Write-Utf8NoBom $jsonPath ($payload | ConvertTo-Json -Depth 6)
@@ -164,7 +168,7 @@ function Invoke-FixDna {
         $changed += (& git ls-files --others --exclude-standard)
         $changed = @($changed | Where-Object { $_ } | Sort-Object -Unique)
         $terms = Normalize-Terms $TaskText
-        $domains = New-Object Collections.Generic.List[string]
+        $domains = @()
         $rules = @{
             auth='auth|login|session|permission|role';
             database='sql|migration|supabase|database|rls';
@@ -175,26 +179,46 @@ function Invoke-FixDna {
             docs='readme|documentation|changelog|guide'
         }
         foreach ($key in $rules.Keys) {
-            if ($TaskText -match ('(?i)' + $rules[$key])) { $domains.Add($key) }
+            if ($TaskText -match ('(?i)' + $rules[$key])) { $domains += $key }
         }
         foreach ($file in $changed) {
             foreach ($key in $rules.Keys) {
-                if ($file -match ('(?i)' + $rules[$key]) -and $domains -notcontains $key) { $domains.Add($key) }
+                if ($file -match ('(?i)' + $rules[$key]) -and $domains -notcontains $key) { $domains += $key }
             }
         }
-        $route = if ($TaskText -match '(?i)auth|security|rls|sql|migration|production|release|payment|broker|trading|financial|secret|credential|deploy|architecture|dependency|native|permission|encryption') { 'CODEX_REQUIRED' } elseif ($TaskText -match '(?i)readme|documentation|summary|wording|typo|naming|duplicate|todo|comment|log|boilerplate|changelog') { 'LOCAL_FIRST_THEN_CODEX_VERIFY' } else { 'CODEX_PRIMARY_WITH_DETERMINISTIC_TOOLS' }
+
+        $route = 'CODEX_PRIMARY_WITH_DETERMINISTIC_TOOLS'
+        if ($TaskText -match '(?i)auth|security|rls|sql|migration|production|release|payment|broker|trading|financial|secret|credential|deploy|architecture|dependency|native|permission|encryption') {
+            $route = 'CODEX_REQUIRED'
+        }
+        elseif ($TaskText -match '(?i)readme|documentation|summary|wording|typo|naming|duplicate|todo|comment|log|boilerplate|changelog') {
+            $route = 'LOCAL_FIRST_THEN_CODEX_VERIFY'
+        }
+
         $dna = [pscustomobject]@{
             generated = (Get-Date -Format o)
             task = $TaskText
             route = $route
             terms = @($terms)
             domains = @($domains | Sort-Object -Unique)
-            changedFiles = $changed
+            changedFiles = @($changed)
             branch = ((& git branch --show-current | Out-String).Trim())
             commit = ((& git rev-parse HEAD | Out-String).Trim())
         }
         $jsonPath = Join-Path $Root '.ai\context\fix-dna.generated.json'
         Write-Utf8NoBom $jsonPath ($dna | ConvertTo-Json -Depth 6)
+
+        $termLines = @($dna.terms | ForEach-Object { '- `' + $_ + '`' })
+        $domainLines = @($dna.domains | ForEach-Object { '- `' + $_ + '`' })
+        if ($termLines.Count -eq 0) { $termLines = @('- none') }
+        if ($domainLines.Count -eq 0) { $domainLines = @('- none') }
+        if ($changed.Count -gt 0) {
+            $changedLines = @($changed | ForEach-Object { '- `' + $_ + '`' })
+        }
+        else {
+            $changedLines = @('- none')
+        }
+
         $md = @"
 # ADOS Fix DNA
 
@@ -205,13 +229,13 @@ Route: $($dna.route)
 $TaskText
 
 ## Terms
-$((@($dna.terms) | ForEach-Object { '- `' + $_ + '`' }) -join "`r`n")
+$($termLines -join "`r`n")
 
 ## Domains
-$((@($dna.domains) | ForEach-Object { '- `' + $_ + '`' }) -join "`r`n")
+$($domainLines -join "`r`n")
 
 ## Changed files
-$((if ($changed.Count) { ($changed | ForEach-Object { '- `' + $_ + '`' }) -join "`r`n" } else { '- none' }))
+$($changedLines -join "`r`n")
 "@
         $mdPath = Join-Path $Root '.ai\context\fix-dna.generated.md'
         Write-Utf8NoBom $mdPath $md
