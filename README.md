@@ -1,17 +1,19 @@
-# Albert DevCore
+# Albert DevCore and ADOS
 
-Бесплатное локальное ядро разработки для ATLAS, NAVIRA и будущих проектов.
+Free local development infrastructure for ATLAS, NAVIRA, and future projects.
 
-## Принципы
+## Principles
 
-- никаких платных AI API;
-- Codex используется для сложной архитектуры, критического кода и финальной проверки;
-- Ollama используется только для ограниченных read-only задач;
-- сначала deterministic tools: Git, ripgrep, тесты, линтеры и статический анализ;
-- контекст собирается инкрементально, без перечитывания всего репозитория;
-- существующие AGENTS.md и проектные правила не перезаписываются.
+- no paid AI APIs;
+- Codex is used for architecture, critical code, and final verification;
+- Ollama is limited to bounded read-only tasks;
+- deterministic tools run before model work;
+- context is assembled incrementally instead of rereading the repository;
+- existing AGENTS.md and repository-specific rules remain authoritative;
+- generated memory and analytics remain local by default;
+- Windows PowerShell 5.1 compatibility is required.
 
-## Команды
+## DevCore commands
 
 ```powershell
 .\devcore.ps1 doctor
@@ -19,38 +21,63 @@
 .\devcore.ps1 register -ProjectPath "C:\path\to\repo"
 .\devcore.ps1 projects
 .\devcore.ps1 update -ProjectPath "C:\path\to\repo"
-.\devcore.ps1 route -Task "Исправить текст README"
-.\devcore.ps1 packet -ProjectPath "C:\path\to\repo" -Task "Исправить баг друзей"
-.\devcore.ps1 local -ProjectPath "C:\path\to\repo" -Task "Проверь документацию" -Files @("README.md")
+.\devcore.ps1 route -Task "Review README wording"
+.\devcore.ps1 packet -ProjectPath "C:\path\to\repo" -Task "Fix a friends bug"
+.\devcore.ps1 local -ProjectPath "C:\path\to\repo" -Task "Review documentation" -Files @("README.md")
 .\devcore.ps1 review -ProjectPath "C:\path\to\repo"
 ```
 
-## v0.1
+## ADOS commands
 
-- диагностика окружения;
-- безопасное подключение существующего репозитория;
-- автоматическая карта репозитория;
-- компактный session context;
-- локальный task router;
-- read-only Ollama runner;
-- локальный reviewer текущего diff;
-- шаблон для будущих проектов.
+ADOS orchestrates DevCore, repair memory, Heat Map, Knowledge Graph, Fix DNA, prompt packets, audits, and handoffs.
 
-## v0.2
+```powershell
+.\ados.ps1 doctor
 
-- реестр проектов в `%USERPROFILE%\.albert-devcore\projects.json`;
-- лёгкая карта импортов для JavaScript, TypeScript и Python;
-- автоматический подбор сфокусированных проверок по изменённым файлам;
-- prompt packet под конкретную задачу;
-- поиск релевантных файлов через ripgrep;
-- ограничение контекста по байтам;
-- приоритет проектных правил, текущего diff и долговременной памяти;
-- новые команды `register`, `projects` и `packet`.
+.\ados.ps1 start `
+  -ProjectPath "C:\path\to\repo" `
+  -Task "Fix the error when adding a found user as a friend"
 
-Команда `packet` создаёт `.ai/context/prompt-packet.generated.md`. Она не отправляет содержимое модели автоматически, а формирует компактный маршрут чтения для Codex или другого агента.
+.\ados.ps1 analyze `
+  -ProjectPath "C:\path\to\repo" `
+  -Task "Prepare the next safe project stage"
 
-## Ограничения
+.\ados.ps1 night `
+  -ProjectPath "C:\path\to\repo"
 
-DevCore не предоставляет локальной модели права изменять код. Любой её результат считается недоверенным до проверки исходниками, тестами и Codex.
+.\ados.ps1 handoff `
+  -ProjectPath "C:\path\to\repo"
+```
 
-Карта импортов является лексической навигационной картой, а не полноценным compiler-resolved dependency graph. Все найденные связи должны проверяться по исходникам.
+## ADOS modules
+
+- Dispatcher: selects Codex, deterministic-first, or local-first execution.
+- Change Detector: reads current Git state before broad repository context.
+- Context Engine: generates maps, focused checks, and task packets.
+- Repair Memory: indexes commit subjects and changed paths locally.
+- Heat Map: ranks frequently and recently changed areas.
+- Knowledge Graph: creates a lightweight import relationship graph.
+- Fix DNA: records task terms, route, domains, and changed files.
+- Night Audit: reports conflict markers, large files, TODOs, and repository status without editing code.
+- Handoff: creates a resumable continuation packet.
+
+Architecture details are in `docs/ADOS_ARCHITECTURE.md`.
+
+## Generated local files
+
+ADOS may create files under:
+
+```text
+.ai/context/
+.ai/memory/
+.ai/analytics/
+.ai/local-output/
+```
+
+The orchestrator adds them to `.git/info/exclude` so they remain local even when a project does not yet contain shared ignore rules.
+
+## Trust boundary
+
+DevCore and ADOS do not give local models permission to modify product code. Local-model output, generated dependency maps, historical similarity, Heat Map scores, and audit findings are advisory until verified against source code, deterministic checks, and Codex review.
+
+Security, authentication, permissions, RLS, migrations, production, releases, financial logic, dependencies, and architecture remain protected domains.
