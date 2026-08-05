@@ -21,42 +21,32 @@ function Resolve-RepoRoot {
     Push-Location $resolved
     try {
         $root = (& git rev-parse --show-toplevel 2>$null | Out-String).Trim()
-        if (-not $root) {
-            throw "Not a Git repository: $resolved"
-        }
+        if (-not $root) { throw "Not a Git repository: $resolved" }
         return [IO.Path]::GetFullPath($root).TrimEnd('\', '/')
     }
-    finally {
-        Pop-Location
-    }
+    finally { Pop-Location }
 }
 
 function Ensure-Directory {
     param([string]$Path)
-
-    if ($Path) {
-        New-Item -ItemType Directory -Path $Path -Force | Out-Null
-    }
+    if ($Path) { New-Item -ItemType Directory -Path $Path -Force | Out-Null }
 }
 
 function Write-Utf8NoBom {
-    param(
-        [string]$Path,
-        [string]$Content
-    )
-
+    param([string]$Path, [string]$Content)
     Ensure-Directory (Split-Path -Parent $Path)
-    [IO.File]::WriteAllText($Path, $Content, [Text.UTF8Encoding]::new($false))
+    $encoding = New-Object System.Text.UTF8Encoding($false)
+    [IO.File]::WriteAllText($Path, $Content, $encoding)
 }
 
 function Normalize-Terms {
     param([string]$Text)
 
     $stop = @(
-        'the', 'and', 'for', 'with', 'from', 'this', 'that', 'into', 'when', 'then',
-        'fix', 'fixed', 'update', 'updated', 'change', 'changed', 'add', 'added',
-        'remove', 'removed', 'error', 'issue', 'bug', 'task', 'project', 'code',
-        'file', 'files'
+        'the','and','for','with','from','this','that','into','when','then',
+        'fix','fixed','update','updated','change','changed','add','added',
+        'remove','removed','error','issue','bug','task','project','code',
+        'file','files'
     )
 
     $parts = [regex]::Matches($Text.ToLowerInvariant(), '[a-z0-9_\-]{3,}') |
@@ -67,88 +57,79 @@ function Normalize-Terms {
 
 function Get-MemoryPath {
     param([string]$Root)
-
     return Join-Path $Root '.ai\memory\repair-memory.json'
 }
 
 function Invoke-Index {
-    param(
-        [string]$Root,
-        [int]$Limit
-    )
+    param([string]$Root, [int]$Limit)
 
     Push-Location $Root
     try {
         $format = '%H%x1f%ad%x1f%s%x1e'
         $raw = (& git log -n $Limit --date=iso-strict --pretty=format:$format --name-only | Out-String)
-        $records = New-Object Collections.Generic.List[object]
+        $records = @()
 
-        foreach ($block in ($raw -split [char]0x1e)) {
-            $block = $block.Trim()
+        foreach ($blockText in ($raw -split [char]0x1e)) {
+            $block = $blockText.Trim()
             if (-not $block) { continue }
 
-            $lines = @($block -split "`r?`n")
-            $header = $lines[0] -split [char]0x1f
+            $logLines = @($block -split "`r?`n")
+            $header = @($logLines[0] -split [char]0x1f)
             if ($header.Count -lt 3) { continue }
 
-            $files = @(
-                $lines |
+            $changedFiles = @(
+                $logLines |
                     Select-Object -Skip 1 |
                     Where-Object { $_ -and $_ -notmatch '^\s*$' } |
                     Sort-Object -Unique
             )
 
-            $subject = $header[2]
-            $terms = Normalize-Terms ($subject + ' ' + ($files -join ' '))
+            $subject = [string]$header[2]
+            $terms = @(Normalize-Terms ($subject + ' ' + ($changedFiles -join ' ')))
 
-            $records.Add([pscustomobject]@{
-                commit = $header[0]
-                date = $header[1]
+            $record = [pscustomobject]@{
+                commit = [string]$header[0]
+                date = [string]$header[1]
                 subject = $subject
-                files = $files
-                terms = $terms
-            })
+                files = @($changedFiles)
+                terms = @($terms)
+            }
+
+            $records += $record
         }
 
-        $payload = [pscustomobject]@{
+        $head = ((& git rev-parse HEAD | Out-String).Trim())
+        $payload = [ordered]@{
             generated = (Get-Date -Format o)
             repository = $Root
-            head = ((& git rev-parse HEAD | Out-String).Trim())
-            commitsIndexed = $records.Count
+            head = $head
+            commitsIndexed = @($records).Count
             records = @($records)
         }
 
         $path = Get-MemoryPath $Root
-        Write-Utf8NoBom $path ($payload | ConvertTo-Json -Depth 8)
-        Write-Host "Indexed $($records.Count) commits into $path"
+        $json = $payload | ConvertTo-Json -Depth 8
+        Write-Utf8NoBom $path $json
+        Write-Host "Indexed $(@($records).Count) commits into $path"
     }
-    finally {
-        Pop-Location
-    }
+    finally { Pop-Location }
 }
 
 function Get-Score {
-    param(
-        $Record,
-        [string[]]$Terms
-    )
+    param($Record, [string[]]$Terms)
 
     $score = 0
+    $subject = [string]$Record.subject
+    $recordTerms = @($Record.terms)
+    $recordFiles = @($Record.files)
+
     foreach ($term in $Terms) {
-        if ($Record.subject.ToLowerInvariant().Contains($term)) {
-            $score += 5
+        if ($subject.ToLowerInvariant().Contains($term)) { $score += 5 }
+        foreach ($recordTerm in $recordTerms) {
+            if ([string]$recordTerm -eq $term) { $score += 2 }
         }
-
-        foreach ($recordTerm in $Record.terms) {
-            if ($recordTerm -eq $term) {
-                $score += 2
-            }
-        }
-
-        foreach ($file in $Record.files) {
-            if ($file.ToLowerInvariant().Contains($term)) {
-                $score += 1
-            }
+        foreach ($file in $recordFiles) {
+            if ([string]$file -and ([string]$file).ToLowerInvariant().Contains($term)) { $score += 1 }
         }
     }
 
@@ -156,68 +137,64 @@ function Get-Score {
 }
 
 function Invoke-Search {
-    param(
-        [string]$Root,
-        [string]$Text,
-        [int]$Limit
-    )
+    param([string]$Root, [string]$Text, [int]$Limit)
 
-    if (-not $Text) {
-        throw 'Query is required for search.'
-    }
+    if (-not $Text) { throw 'Query is required for search.' }
 
     $path = Get-MemoryPath $Root
-    if (-not (Test-Path $path)) {
-        Invoke-Index $Root $MaxCommits
-    }
+    if (-not (Test-Path $path)) { Invoke-Index $Root $MaxCommits }
 
     $memory = Get-Content $path -Raw | ConvertFrom-Json
-    $terms = Normalize-Terms $Text
+    $terms = @(Normalize-Terms $Text)
+    $results = @()
 
-    $results = foreach ($record in $memory.records) {
+    foreach ($record in @($memory.records)) {
         $score = Get-Score $record $terms
         if ($score -gt 0) {
-            [pscustomobject]@{
+            $commitText = [string]$record.commit
+            $shortCommit = if ($commitText.Length -gt 12) { $commitText.Substring(0, 12) } else { $commitText }
+            $results += [pscustomobject]@{
                 Score = $score
-                Commit = $record.commit.Substring(0, 12)
-                Date = $record.date
-                Subject = $record.subject
+                Commit = $shortCommit
+                Date = [string]$record.date
+                Subject = [string]$record.subject
                 Files = ((@($record.files) | Select-Object -First 5) -join ', ')
             }
         }
     }
 
-    $sortRules = @(
-        @{ Expression = 'Score'; Descending = $true },
-        @{ Expression = 'Date'; Descending = $true }
+    $ranked = @(
+        $results |
+            Sort-Object -Property @{Expression='Score';Descending=$true}, @{Expression='Date';Descending=$true} |
+            Select-Object -First $Limit
     )
 
-    $ranked = @($results | Sort-Object -Property $sortRules | Select-Object -First $Limit)
+    $outputPath = Join-Path $Root '.ai\context\similar-repairs.generated.md'
     if ($ranked.Count -eq 0) {
+        Write-Utf8NoBom $outputPath ("# Similar repair history`r`n`r`nQuery: $Text`r`n`r`nNo similar repairs found.")
         Write-Host 'No similar repairs found.'
         return
     }
 
     $ranked | Format-Table -AutoSize
 
-    $lines = New-Object Collections.Generic.List[string]
-    $lines.Add('# Similar repair history')
-    $lines.Add('')
-    $lines.Add("Query: $Text")
-    $lines.Add("Generated: $(Get-Date -Format o)")
-    $lines.Add('')
+    $outputLines = @(
+        '# Similar repair history',
+        '',
+        "Query: $Text",
+        "Generated: $(Get-Date -Format o)",
+        ''
+    )
 
     foreach ($item in $ranked) {
-        $lines.Add("## $($item.Commit) - $($item.Subject)")
-        $lines.Add("- Score: $($item.Score)")
-        $lines.Add("- Date: $($item.Date)")
-        $lines.Add("- Files: $($item.Files)")
-        $lines.Add('')
+        $outputLines += "## $($item.Commit) - $($item.Subject)"
+        $outputLines += "- Score: $($item.Score)"
+        $outputLines += "- Date: $($item.Date)"
+        $outputLines += "- Files: $($item.Files)"
+        $outputLines += ''
     }
 
-    Write-Utf8NoBom (
-        Join-Path $Root '.ai\context\similar-repairs.generated.md'
-    ) ($lines -join "`r`n")
+    Write-Utf8NoBom $outputPath ($outputLines -join "`r`n")
 }
 
 function Invoke-Handoff {
@@ -233,12 +210,7 @@ function Invoke-Handoff {
         $recent = (& git log -n 8 --pretty=format:'%h %ad %s' --date=short | Out-String).TrimEnd()
 
         $testsPath = Join-Path $Root '.ai\context\test-plan.generated.md'
-        $tests = if (Test-Path $testsPath) {
-            Get-Content $testsPath -Raw
-        }
-        else {
-            'No generated test plan.'
-        }
+        $tests = if (Test-Path $testsPath) { Get-Content $testsPath -Raw } else { 'No generated test plan.' }
 
         $content = @"
 # Development handoff
@@ -283,21 +255,13 @@ $tests
         Write-Utf8NoBom $path $content
         Write-Host "Handoff written to $path"
     }
-    finally {
-        Pop-Location
-    }
+    finally { Pop-Location }
 }
 
 $root = Resolve-RepoRoot $ProjectPath
 
 switch ($Command) {
-    'index' {
-        Invoke-Index $root $MaxCommits
-    }
-    'search' {
-        Invoke-Search $root $Query $MaxResults
-    }
-    'handoff' {
-        Invoke-Handoff $root
-    }
+    'index' { Invoke-Index $root $MaxCommits }
+    'search' { Invoke-Search $root $Query $MaxResults }
+    'handoff' { Invoke-Handoff $root }
 }
