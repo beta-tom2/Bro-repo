@@ -18,6 +18,7 @@ function Resolve-NpxCommand {
 }
 
 $NpxCommand = Resolve-NpxCommand
+$Failures = New-Object Collections.Generic.List[object]
 
 function Invoke-SkillInstall {
     param([string]$Source, [string]$Skill)
@@ -34,7 +35,8 @@ function Invoke-SkillInstall {
 
     & $NpxCommand @args
     if ($LASTEXITCODE -ne 0) {
-        throw "Skill install failed: $Skill from $Source (exit code $LASTEXITCODE)"
+        $Failures.Add([pscustomobject]@{ Source=$Source; Skill=$Skill; ExitCode=$LASTEXITCODE })
+        Write-Warning "Skill install failed: $Skill from $Source (exit code $LASTEXITCODE). Continuing with remaining approved skills."
     }
 }
 
@@ -43,9 +45,9 @@ $approvedSkills = @(
     @{ Source = "https://github.com/beta-tom2/albert-devcore"; Skill = "albert-architecture-review" },
     @{ Source = "https://github.com/vercel-labs/skills"; Skill = "find-skills" },
     @{ Source = "https://github.com/anthropics/skills"; Skill = "frontend-design" },
-    @{ Source = "https://github.com/expo/skills"; Skill = "building-native-ui" },
-    @{ Source = "https://github.com/expo/skills"; Skill = "native-data-fetching" },
-    @{ Source = "https://github.com/expo/skills"; Skill = "upgrading-expo" },
+    @{ Source = "https://github.com/expo/skills"; Skill = "expo-native-ui" },
+    @{ Source = "https://github.com/expo/skills"; Skill = "expo-data-fetching" },
+    @{ Source = "https://github.com/expo/skills"; Skill = "expo-upgrade" },
     @{ Source = "https://github.com/vercel-labs/agent-skills"; Skill = "vercel-react-native-skills" },
     @{ Source = "https://github.com/supabase/agent-skills"; Skill = "supabase" },
     @{ Source = "https://github.com/supabase/agent-skills"; Skill = "supabase-postgres-best-practices" },
@@ -77,3 +79,10 @@ if ($ProjectPath) {
 
 Write-Host "Albert Dev Skills installation plan completed."
 Write-Host "Policy remains selective: installed does not mean always invoked."
+if (-not $DryRun -and $Failures.Count -gt 0) {
+    Write-Warning ("{0} skill installation(s) failed. Review the summary below:" -f $Failures.Count)
+    foreach ($failure in $Failures) {
+        Write-Host ("  - {0} <= {1} (exit {2})" -f $failure.Skill,$failure.Source,$failure.ExitCode)
+    }
+    exit 2
+}
