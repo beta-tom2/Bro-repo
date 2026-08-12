@@ -100,6 +100,15 @@ Assert-True ($packet -match 'duplicates src\\friends(?:-copy)?\.ts') 'prompt pac
 $sessionContext = Get-Content -LiteralPath (Join-Path $ResolvedFixture '.ai\context\session-context.md') -Raw
 Assert-True ($sessionContext.IndexOf('docs\project-brain\README.md') -lt $sessionContext.IndexOf('README.md when task-relevant')) 'session context must route Project Brain before the optional root README'
 
+$originalDisableRg = $env:ADOS_DISABLE_RG
+$env:ADOS_DISABLE_RG = '1'
+try {
+    & $Ados analyze -ProjectPath $ResolvedFixture -Task 'Find sendFriendRequest without ripgrep' -MaxFiles 100 -MaxCommits 20
+}
+finally { $env:ADOS_DISABLE_RG = $originalDisableRg }
+$fallbackPacket = Get-Content -LiteralPath (Join-Path $ResolvedFixture '.ai\context\prompt-packet.generated.md') -Raw
+Assert-True ($fallbackPacket -match 'src\\friends(?:-copy)?\.ts') 'native PowerShell fallback must find task-relevant files without rg'
+
 & $Operations adapter -ProjectPath $ResolvedFixture
 $adapter = Read-Json '.ai\context\project-adapter.generated.json'
 Assert-True ($adapter.protectedBoundaries -contains 'secrets') 'custom adapters must not remove global protected boundaries'

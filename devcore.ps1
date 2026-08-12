@@ -54,7 +54,7 @@ function Test-CommandAvailable {
 function Invoke-Doctor {
     $checks = @(
         @{ Name='git'; Required=$true },
-        @{ Name='rg'; Required=$true },
+        @{ Name='rg'; Required=$false },
         @{ Name='ollama'; Required=$false },
         @{ Name='node'; Required=$false },
         @{ Name='npm'; Required=$false }
@@ -294,6 +294,43 @@ function Get-SelectionHash {
     catch { return '' }
 }
 
+function Find-TaskFiles {
+    param([string]$Root,[string[]]$Terms)
+
+    $matches = New-Object Collections.Generic.List[string]
+    Push-Location $Root
+    try {
+        if (-not $env:ADOS_DISABLE_RG -and (Test-CommandAvailable 'rg')) {
+            foreach ($term in $Terms) {
+                $found = & rg -l --hidden --glob '!node_modules/**' --glob '!.git/**' --glob '!.ai/**' --glob '!dist/**' --glob '!build/**' --fixed-strings $term . 2>$null
+                foreach ($match in $found) {
+                    $clean = ([string]$match).TrimStart('.','\','/')
+                    if ($clean -and $matches -notcontains $clean) { $matches.Add($clean) }
+                }
+            }
+        }
+        else {
+            $extensions = @('.ts','.tsx','.js','.jsx','.mjs','.cjs','.py','.ps1','.psm1','.psd1','.rs','.go','.java','.kt','.kts','.cs','.sql','.md','.txt','.json','.yaml','.yml','.toml')
+            $excluded = '(?i)[\\/](node_modules|dist|build|coverage|\.git|\.ai|\.next|\.expo|ios|android|vendor|target|bin|obj)[\\/]'
+            $files = @(Get-ChildItem -LiteralPath $Root -File -Recurse -ErrorAction SilentlyContinue |
+                Where-Object { $extensions -contains $_.Extension.ToLowerInvariant() -and $_.FullName -notmatch $excluded -and $_.Length -lt 1000000 } |
+                Sort-Object FullName |
+                Select-Object -First 5000)
+            foreach ($file in $files) {
+                foreach ($term in $Terms) {
+                    if (Select-String -LiteralPath $file.FullName -Pattern $term -SimpleMatch -Quiet -ErrorAction SilentlyContinue) {
+                        $relative = Get-RelativePathCompat $Root $file.FullName
+                        if ($relative -and $matches -notcontains $relative) { $matches.Add($relative) }
+                        break
+                    }
+                }
+            }
+        }
+    }
+    finally { Pop-Location }
+    return @($matches)
+}
+
 function Invoke-Packet {
     param([string]$Path,[string]$TaskText,[int]$Budget)
     if (-not $TaskText) { throw 'Task is required for packet.' }
@@ -302,15 +339,11 @@ function Invoke-Packet {
     $route = Invoke-Route $TaskText
     $terms = Get-TaskTerms $TaskText
     $candidateFiles = New-Object Collections.Generic.List[string]
+    foreach ($match in (Find-TaskFiles $root $terms)) {
+        if ($candidateFiles -notcontains $match) { $candidateFiles.Add($match) }
+    }
     Push-Location $root
     try {
-        foreach ($term in $terms) {
-            $matches = & rg -l --hidden --glob '!node_modules/**' --glob '!.git/**' --glob '!.ai/**' --glob '!dist/**' --glob '!build/**' --fixed-strings $term . 2>$null
-            foreach ($match in $matches) {
-                $clean = $match.TrimStart('.','\','/')
-                if ($clean -and $candidateFiles -notcontains $clean) { $candidateFiles.Add($clean) }
-            }
-        }
         foreach ($changed in (Get-ChangedFiles $root)) { if ($candidateFiles -notcontains $changed) { $candidateFiles.Insert(0,$changed) } }
         $entrypoints = @(Get-ContextEntrypoints $root)
         $baseFiles = @('AGENTS.md') + $entrypoints + @('.ai/context/current-state.md','.ai/context/decisions.md','.ai/context/repo-map.generated.md','.ai/context/import-map.generated.md','.ai/context/test-plan.generated.md')

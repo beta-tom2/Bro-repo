@@ -161,3 +161,5 @@ Run the deterministic integration fixture under Windows PowerShell 5.1:
 The test creates an isolated Git fixture under `tests/.work/`, exercises the complete v0.3 pipeline, and expects `ADOS v0.3 smoke test: PASS`.
 
 Pull requests that touch ADOS code run the same parser and smoke checks on a standard Windows runner using Windows PowerShell 5.1. The workflow is deterministic, read-only outside its disposable fixture, and does not call a model or paid API.
+
+`rg` remains the preferred fast search path. When it is unavailable, prompt-packet candidate discovery falls back to bounded native PowerShell scanning, so a clean Windows machine can still run ADOS without installing another tool.
