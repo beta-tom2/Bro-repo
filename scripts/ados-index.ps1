@@ -266,13 +266,92 @@ function Add-AdosTestAssociation {
     $item.symbols = @($item.symbols + $Symbols | Where-Object { $_ } | Sort-Object -Unique | Select-Object -First 40)
 }
 
+function Invoke-AdosCompilerReferences {
+    param([string]$Root)
+
+    $resultPath = Join-Path $Root '.ai\index\compiler-references.generated.json'
+    $rawPath = Join-Path $Root '.ai\index\compiler-references.raw.json'
+    $helper = Join-Path $PSScriptRoot 'ados-ts-references.js'
+    $currentHead = Get-AdosHead $Root
+    $currentFingerprint = Get-AdosEvidenceFingerprint $Root
+    $typescriptPackage = Join-Path $Root 'node_modules\typescript\package.json'
+    $compilerMarker = if (Test-Path -LiteralPath $typescriptPackage -PathType Leaf) { (Get-FileHash -LiteralPath $typescriptPackage -Algorithm SHA256).Hash.ToLowerInvariant() } else { 'missing' }
+    $previous = Read-AdosJson $resultPath $null
+    if ($previous -and @($previous.PSObject.Properties.Name) -contains 'compilerMarker' -and [string]$previous.head -eq $currentHead -and [string]$previous.evidenceFingerprint -eq $currentFingerprint -and [string]$previous.compilerMarker -eq $compilerMarker) {
+        Write-Host "Compiler references reused: $([string]$previous.status) ($(@($previous.references).Count) references)"
+        return $previous
+    }
+    $node = Get-Command node -ErrorAction SilentlyContinue
+    if (-not $node -or -not (Test-Path -LiteralPath $helper -PathType Leaf)) {
+        $payload = [ordered]@{ schemaVersion=1; generated=(Get-Date -Format o); status='SKIP'; reason='node or resolver helper unavailable'; head=$currentHead; evidenceFingerprint=$currentFingerprint; compilerMarker=$compilerMarker; references=@(); safety='No dependency installation or network call.' }
+        Write-AdosJson $resultPath $payload 8
+        return $payload
+    }
+
+    Remove-Item -LiteralPath $rawPath -Force -ErrorAction SilentlyContinue
+    $timer = [Diagnostics.Stopwatch]::StartNew()
+    $helperArgument = '"' + $helper + '"'
+    $rootArgument = '"' + $Root + '"'
+    $outputArgument = '"' + $rawPath + '"'
+    $process = Start-Process -FilePath $node.Source -ArgumentList @(
+        $helperArgument,'--root',$rootArgument,'--output',$outputArgument,'--maxProjects','40','--maxFiles','4000','--maxSymbols','1200','--maxReferences','12000','--maxMilliseconds','30000'
+    ) -WindowStyle Hidden -PassThru
+    if (-not $process.WaitForExit(35000)) {
+        try { $process.Kill() } catch { }
+        $timer.Stop()
+        $payload = [ordered]@{ schemaVersion=1; generated=(Get-Date -Format o); status='PARTIAL'; reason='resolver exceeded the 35 second process limit'; head=$currentHead; evidenceFingerprint=$currentFingerprint; compilerMarker=$compilerMarker; resolver='typescript-language-service'; typescriptVersion=''; projectCount=0; filesAnalyzed=0; symbolsAnalyzed=0; referenceCount=0; durationMs=$timer.ElapsedMilliseconds; references=@(); safety='Read-only project-local TypeScript language service; process stopped at the configured limit.' }
+        Write-AdosJson $resultPath $payload 8
+        Remove-Item -LiteralPath $rawPath -Force -ErrorAction SilentlyContinue
+        Write-Host 'Compiler references: PARTIAL (process time limit)'
+        return $payload
+    }
+    $timer.Stop()
+    $raw = Read-AdosJson $rawPath $null
+    Remove-Item -LiteralPath $rawPath -Force -ErrorAction SilentlyContinue
+    if (-not $raw) {
+        $raw = [pscustomobject]@{ status='ERROR'; reason="resolver returned no readable output (exit $($process.ExitCode))"; references=@() }
+    }
+    $rawProperties = @($raw.PSObject.Properties.Name)
+    $status = [string]$raw.status
+    if (@('PASS','PARTIAL','SKIP','ERROR') -notcontains $status) { $status = 'ERROR' }
+    $payload = [ordered]@{
+        schemaVersion = 1
+        generated = (Get-Date -Format o)
+        status = $status
+        reason = [string]$raw.reason
+        head = $currentHead
+        evidenceFingerprint = $currentFingerprint
+        compilerMarker = $compilerMarker
+        resolver = $(if ($rawProperties -contains 'resolver' -and $raw.resolver) { [string]$raw.resolver } else { 'typescript-language-service' })
+        typescriptVersion = $(if ($rawProperties -contains 'typescriptVersion' -and $raw.typescriptVersion) { [string]$raw.typescriptVersion } else { '' })
+        projectCount = $(if ($rawProperties -contains 'projectCount' -and $raw.projectCount) { [int]$raw.projectCount } else { 0 })
+        filesAnalyzed = $(if ($rawProperties -contains 'filesAnalyzed' -and $raw.filesAnalyzed) { [int]$raw.filesAnalyzed } else { 0 })
+        symbolsAnalyzed = $(if ($rawProperties -contains 'symbolsAnalyzed' -and $raw.symbolsAnalyzed) { [int]$raw.symbolsAnalyzed } else { 0 })
+        referenceCount = $(if ($rawProperties -contains 'references') { @($raw.references).Count } else { 0 })
+        durationMs = $timer.ElapsedMilliseconds
+        references = $(if ($rawProperties -contains 'references') { @($raw.references) } else { @() })
+        safety = 'Read-only project-local TypeScript language service; no dependency installation, model, paid API, or network call.'
+    }
+    Write-AdosJson $resultPath $payload 10
+    $lines = @('# ADOS compiler references','',"Status: $status","Reason: $($payload.reason)","TypeScript: $($payload.typescriptVersion)","Projects: $($payload.projectCount)","Files: $($payload.filesAnalyzed)","Symbols: $($payload.symbolsAnalyzed)","References: $($payload.referenceCount)","Duration ms: $($payload.durationMs)",'','| Symbol | Definition | Reference |','|---|---|---|')
+    foreach ($item in @($payload.references | Select-Object -First 500)) { $lines += "| $($item.symbol) | $($item.definitionFile) | $($item.referenceFile):$($item.line) |" }
+    if ($payload.referenceCount -eq 0) { $lines += '| none | none | none |' }
+    if ($payload.referenceCount -gt 500) { $lines += "| ... | ... | $($payload.referenceCount - 500) references omitted |" }
+    $lines += @('','_Optional local compiler evidence. Lexical indexes remain the fallback._')
+    Write-AdosUtf8 (Join-Path $Root '.ai\index\compiler-references.generated.md') ($lines -join "`r`n")
+    Add-AdosUsageEvent $Root 'compiler-references' $status $timer.ElapsedMilliseconds 0 0 @{ projects=$payload.projectCount; files=$payload.filesAnalyzed; symbols=$payload.symbolsAnalyzed; references=$payload.referenceCount }
+    Write-Host "Compiler references: $status ($($payload.referenceCount) references)"
+    return $payload
+}
+
 function Invoke-AdosTestSymbolMap {
-    param([string]$Root, $HashIndex, $SymbolIndex)
+    param([string]$Root, $HashIndex, $SymbolIndex, $CompilerReferences)
 
     if (-not $HashIndex) { $HashIndex = Read-AdosJson (Join-Path $Root '.ai\index\hash-index.generated.json') $null }
     if (-not $HashIndex) { $HashIndex = Invoke-AdosIncrementalIndex $Root $MaxFiles $false }
     if (-not $SymbolIndex) { $SymbolIndex = Read-AdosJson (Join-Path $Root '.ai\index\symbol-index.generated.json') $null }
     if (-not $SymbolIndex) { $SymbolIndex = Invoke-AdosSymbolIndex $Root $HashIndex }
+    if (-not $CompilerReferences) { $CompilerReferences = Invoke-AdosCompilerReferences $Root }
 
     $entries = @($HashIndex.files)
     $codeLanguages = @('typescript','javascript','python','powershell','rust','go','java','kotlin','csharp','sql')
@@ -303,6 +382,16 @@ function Invoke-AdosTestSymbolMap {
     }
 
     $associationMap = @{}
+    if ($CompilerReferences -and @('PASS','PARTIAL') -contains [string]$CompilerReferences.status) {
+        foreach ($reference in @($CompilerReferences.references)) {
+            $sourcePath = [string]$reference.definitionFile
+            $testPath = [string]$reference.referenceFile
+            if (-not (Test-AdosTestFilePath $testPath)) { continue }
+            if (-not $packageByPath.ContainsKey($sourcePath) -or -not $packageByPath.ContainsKey($testPath)) { continue }
+            if ([string]$packageByPath[$sourcePath] -ne [string]$packageByPath[$testPath]) { continue }
+            Add-AdosTestAssociation $associationMap $sourcePath $testPath ([string]$packageByPath[$testPath]) 'compiler reference' @([string]$reference.symbol)
+        }
+    }
     foreach ($test in $tests) {
         $testPath = [string]$test.path
         $testPackage = [string]$packageByPath[$testPath]
@@ -346,7 +435,7 @@ function Invoke-AdosTestSymbolMap {
     }
 
     $associations = @($associationMap.Values | ForEach-Object {
-        $confidence = if (@($_.reasons) -contains 'relative import') { 'high' } elseif (@($_.reasons) -contains 'unique symbol reference') { 'medium' } else { 'medium' }
+        $confidence = if (@($_.reasons) -contains 'compiler reference') { 'compiler' } elseif (@($_.reasons) -contains 'relative import') { 'high' } elseif (@($_.reasons) -contains 'unique symbol reference') { 'medium' } else { 'medium' }
         [pscustomobject]@{ sourceFile=$_.sourceFile; testFile=$_.testFile; packageRoot=$_.packageRoot; confidence=$confidence; reasons=@($_.reasons); symbols=@($_.symbols) }
     } | Sort-Object sourceFile, testFile | Select-Object -First 5000)
     $indexBasis = @($entries | Sort-Object path | ForEach-Object { ([string]$_.path) + '|' + ([string]$_.hash) }) -join "`n"
@@ -360,6 +449,7 @@ function Invoke-AdosTestSymbolMap {
         sourceFiles = $sources.Count
         testFiles = $tests.Count
         associationCount = $associations.Count
+        compilerReferences = [ordered]@{ status=[string]$CompilerReferences.status; reason=[string]$CompilerReferences.reason; references=@($CompilerReferences.references).Count }
         associations = @($associations)
         safety = 'Deterministic lexical associations only; source and test configuration remain authoritative.'
     }
@@ -507,7 +597,7 @@ function Invoke-AdosElasticContext {
         $sourcePath = [string]$association.sourceFile
         if (-not $baseScores.ContainsKey($sourcePath) -or [int]$baseScores[$sourcePath] -le 0) { continue }
         $testPath = [string]$association.testFile
-        $boost = if ([string]$association.confidence -eq 'high') { 60 } else { 35 }
+        $boost = if ([string]$association.confidence -eq 'compiler') { 80 } elseif ([string]$association.confidence -eq 'high') { 60 } else { 35 }
         if (-not $testBoost.ContainsKey($testPath) -or [int]$testBoost[$testPath] -lt $boost) { $testBoost[$testPath] = $boost }
     }
     $ranked = @()
@@ -586,6 +676,7 @@ Ensure-AdosLocalExclude $root
 $hashIndex = $null
 $symbolIndex = $null
 $testMap = $null
+$compilerReferences = $null
 switch ($Command) {
     'index' { $null = Invoke-AdosIncrementalIndex $root $MaxFiles ([bool]$Force) }
     'symbols' {
@@ -595,7 +686,8 @@ switch ($Command) {
     'tests' {
         $hashIndex = Read-AdosJson (Join-Path $root '.ai\index\hash-index.generated.json') $null
         $symbolIndex = Read-AdosJson (Join-Path $root '.ai\index\symbol-index.generated.json') $null
-        $null = Invoke-AdosTestSymbolMap $root $hashIndex $symbolIndex
+        $compilerReferences = Invoke-AdosCompilerReferences $root
+        $null = Invoke-AdosTestSymbolMap $root $hashIndex $symbolIndex $compilerReferences
     }
     'context' {
         $hashIndex = Read-AdosJson (Join-Path $root '.ai\index\hash-index.generated.json') $null
@@ -606,7 +698,8 @@ switch ($Command) {
     'all' {
         $hashIndex = Invoke-AdosIncrementalIndex $root $MaxFiles ([bool]$Force)
         $symbolIndex = Invoke-AdosSymbolIndex $root $hashIndex
-        $testMap = Invoke-AdosTestSymbolMap $root $hashIndex $symbolIndex
+        $compilerReferences = Invoke-AdosCompilerReferences $root
+        $testMap = Invoke-AdosTestSymbolMap $root $hashIndex $symbolIndex $compilerReferences
         if ($Task) { $null = Invoke-AdosElasticContext $root $Task $ContextTier $hashIndex $symbolIndex $testMap }
     }
 }

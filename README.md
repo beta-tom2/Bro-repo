@@ -110,6 +110,7 @@ ADOS orchestrates DevCore, incremental indexes, project memory, verification evi
 - Handoff: creates a resumable continuation packet.
 - Incremental Hash Index: hashes source files and reuses imports and symbols when content did not change.
 - Symbol Index: maps functions, classes, types, and other language-level declarations to files and lines.
+- Compiler Reference Resolver: optionally uses a project-local TypeScript language service with strict time and result limits; it never installs dependencies.
 - Test-to-Symbol Map: associates tests with source files using relative imports, unique symbols, matching stems, and monorepo package boundaries.
 - Elastic Context: chooses a risk-based budget, prioritizes repository entrypoints, and removes duplicate file content by SHA-256.
 - Error Fingerprinting: normalizes failures into stable local signatures and recurrence counts.

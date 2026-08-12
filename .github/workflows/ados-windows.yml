@@ -53,6 +53,10 @@ jobs:
           }
           if ($failed) { throw 'PowerShell parser errors detected.' }
 
+      - name: Check JavaScript helpers
+        shell: powershell
+        run: node --check .\scripts\ados-ts-references.js
+
       - name: Run ADOS smoke test
         shell: powershell
         run: .\tests\ados-smoke.ps1
