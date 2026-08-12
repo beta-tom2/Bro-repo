@@ -86,7 +86,7 @@ try {
         changedFiles = @($statusLines | ForEach-Object { [string]$_ })
         conflicts = @($conflicts | ForEach-Object { [string]$_ })
         largeFiles = @($rankedLarge)
-        todoFindings = @($todo)
+        todoFindings = @($todo.ToArray())
         safety = 'Read-only deterministic audit; findings are advisory.'
     }
     Write-Utf8NoBom (Join-Path $root '.ai\analytics\night-audit.generated.json') ($payload | ConvertTo-Json -Depth 10)
