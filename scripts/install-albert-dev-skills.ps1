@@ -43,8 +43,19 @@ function Invoke-SkillInstall {
 $approvedSkills = @(
     @{ Source = "https://github.com/beta-tom2/albert-devcore"; Skill = "albert-skill-router" },
     @{ Source = "https://github.com/beta-tom2/albert-devcore"; Skill = "albert-architecture-review" },
+    @{ Source = "https://github.com/beta-tom2/albert-devcore"; Skill = "albert-design-director" },
     @{ Source = "https://github.com/vercel-labs/skills"; Skill = "find-skills" },
+
     @{ Source = "https://github.com/anthropics/skills"; Skill = "frontend-design" },
+    @{ Source = "https://github.com/pbakaus/impeccable"; Skill = "impeccable" },
+    @{ Source = "https://github.com/Leonxlnx/taste-skill"; Skill = "design-taste-frontend" },
+    @{ Source = "https://github.com/emilkowalski/skills"; Skill = "emil-design-eng" },
+    @{ Source = "https://github.com/emilkowalski/skills"; Skill = "animate" },
+    @{ Source = "https://github.com/emilkowalski/skills"; Skill = "find-animation-opportunities" },
+    @{ Source = "https://github.com/emilkowalski/skills"; Skill = "improve-animations" },
+    @{ Source = "https://github.com/emilkowalski/skills"; Skill = "review-animations" },
+    @{ Source = "https://github.com/emilkowalski/skills"; Skill = "apple-design" },
+
     @{ Source = "https://github.com/expo/skills"; Skill = "expo-native-ui" },
     @{ Source = "https://github.com/expo/skills"; Skill = "expo-data-fetching" },
     @{ Source = "https://github.com/expo/skills"; Skill = "expo-upgrade" },
@@ -66,7 +77,7 @@ foreach ($entry in $approvedSkills) {
 
 if ($ProjectPath) {
     $resolvedProject = (Resolve-Path $ProjectPath).Path
-    foreach ($localSkill in @("albert-skill-router", "albert-architecture-review")) {
+    foreach ($localSkill in @("albert-skill-router", "albert-architecture-review", "albert-design-director")) {
         $skillSource = Join-Path $DevCoreRoot ("skills\\" + $localSkill)
         $skillTarget = Join-Path $resolvedProject (".agents\\skills\\" + $localSkill)
         Write-Host "[project-skill] $skillTarget"
