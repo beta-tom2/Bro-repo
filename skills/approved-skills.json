@@ -1,5 +1,5 @@
 {
-  "version": 2,
+  "version": 3,
   "policy": {
     "defaultMode": "selective",
     "thirdPartyDefault": "deny-until-audited",
@@ -12,9 +12,9 @@
     {"name":"albert-architecture-review","source":"beta-tom2/albert-devcore","status":"approved","scope":["architecture"],"trigger":"broad architecture friction review; not tiny refactors"},
     {"name":"find-skills","source":"vercel-labs/skills","status":"approved","scope":["meta"],"trigger":"skill discovery only"},
     {"name":"frontend-design","source":"anthropics/skills","status":"approved","scope":["ui","ux","frontend"],"trigger":"new or substantial user-facing design work"},
-    {"name":"building-native-ui","source":"expo/skills","status":"approved","scope":["expo","react-native","ui"],"trigger":"native UI implementation"},
-    {"name":"native-data-fetching","source":"expo/skills","status":"approved","scope":["expo","react-native","data"],"trigger":"native data fetching or caching work"},
-    {"name":"upgrading-expo","source":"expo/skills","status":"approved","scope":["expo"],"trigger":"Expo upgrade or compatibility work"},
+    {"name":"expo-native-ui","source":"expo/skills","status":"approved","scope":["expo","react-native","ui"],"trigger":"native UI implementation"},
+    {"name":"expo-data-fetching","source":"expo/skills","status":"approved","scope":["expo","react-native","data"],"trigger":"native data fetching or caching work"},
+    {"name":"expo-upgrade","source":"expo/skills","status":"approved","scope":["expo"],"trigger":"Expo upgrade or compatibility work"},
     {"name":"vercel-react-native-skills","source":"vercel-labs/agent-skills","status":"approved","scope":["react-native"],"trigger":"React Native implementation, performance, or review"},
     {"name":"supabase","source":"supabase/agent-skills","status":"approved","scope":["supabase"],"trigger":"Supabase-specific implementation or review"},
     {"name":"supabase-postgres-best-practices","source":"supabase/agent-skills","status":"approved","scope":["postgres","supabase"],"trigger":"schema, SQL, indexes, query design, performance"},
