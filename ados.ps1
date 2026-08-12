@@ -235,6 +235,7 @@ switch ($Command) {
     }
     'verify' {
         Ensure-LocalExclude $repo
+        & $Index all -ProjectPath $repo -MaxFiles $MaxFiles
         & $Quality all -ProjectPath $repo -Task $Task -AllowedScope $AllowedScope -MaxLevel $MaxVerificationLevel -RequireDiff $RequireDiff
     }
     'pr-summary' {

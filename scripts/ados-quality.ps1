@@ -238,11 +238,58 @@ function Invoke-AdosCapturedCommand {
     finally { Pop-Location }
 }
 
+function Get-AdosPackageTestScript {
+    param([string]$PackagePath)
+
+    $packageFile = Join-Path $PackagePath 'package.json'
+    if (-not (Test-Path -LiteralPath $packageFile -PathType Leaf)) { return '' }
+    try {
+        $package = Get-Content -LiteralPath $packageFile -Raw | ConvertFrom-Json
+        $scriptsProperty = @($package.PSObject.Properties | Where-Object { $_.Name -eq 'scripts' } | Select-Object -First 1)
+        if ($scriptsProperty.Count -eq 0 -or -not $scriptsProperty[0].Value) { return '' }
+        $testProperty = @($scriptsProperty[0].Value.PSObject.Properties | Where-Object { $_.Name -eq 'test' } | Select-Object -First 1)
+        if ($testProperty.Count -eq 0) { return '' }
+        return [string]$testProperty[0].Value
+    }
+    catch { return '' }
+}
+
+function Get-AdosFocusedTestSelection {
+    param([string]$Root)
+
+    $map = Read-AdosJson (Join-Path $Root '.ai\index\test-symbol-map.generated.json') $null
+    $current = [bool]($map -and [string]$map.head -eq (Get-AdosHead $Root) -and [string]$map.evidenceFingerprint -eq (Get-AdosEvidenceFingerprint $Root))
+    $changed = @(Get-AdosEvidenceFiles $Root)
+    $candidates = @()
+    if ($current) {
+        foreach ($association in @($map.associations)) {
+            $source = [string]$association.sourceFile
+            $test = [string]$association.testFile
+            if ($changed -notcontains $source -and $changed -notcontains $test) { continue }
+            $candidates += [pscustomobject]@{
+                testFile = $test
+                packageRoot = $(if ($association.packageRoot) { [string]$association.packageRoot } else { '.' })
+                sourceFile = $source
+                confidence = [string]$association.confidence
+            }
+        }
+    }
+    $candidates = @($candidates | Sort-Object testFile, packageRoot -Unique)
+    return [pscustomobject]@{
+        mapCurrent = $current
+        changedFiles = @($changed)
+        candidates = @($candidates)
+    }
+}
+
 function Invoke-AdosVerification {
     param([string]$Root, [int]$Limit)
 
     $timer = [Diagnostics.Stopwatch]::StartNew()
     $results = @()
+    $focusedSelection = Get-AdosFocusedTestSelection $Root
+    $focusedExecuted = $false
+    $focusedFallback = ''
     $diffCheck = Invoke-AdosCapturedCommand $Root 'git' @('-c','core.safecrlf=false','diff','--check')
     $results += New-AdosCheckResult 1 'git diff --check' $(if ($diffCheck.exitCode -eq 0) {'PASS'} else {'FAIL'}) $diffCheck.exitCode $(if ($diffCheck.output) {$diffCheck.output} else {'clean'})
     $stagedDiffCheck = Invoke-AdosCapturedCommand $Root 'git' @('-c','core.safecrlf=false','diff','--cached','--check')
@@ -285,7 +332,43 @@ function Invoke-AdosVerification {
 
     if ($Limit -ge 3) {
         $packagePath = Join-Path $Root 'package.json'
-        if (Test-Path -LiteralPath $packagePath) {
+        $focusedCandidates = @($focusedSelection.candidates)
+        $canRunFocused = [bool]($focusedSelection.mapCurrent -and $focusedCandidates.Count -gt 0 -and $focusedCandidates.Count -le 12)
+        $focusedGroups = @()
+        if ($canRunFocused) {
+            $focusedGroups = @($focusedCandidates | Group-Object packageRoot)
+            foreach ($group in $focusedGroups) {
+                $packageRoot = [string]$group.Name
+                $workingRoot = if ($packageRoot -eq '.') { $Root } else { Join-Path $Root $packageRoot }
+                $testScript = Get-AdosPackageTestScript $workingRoot
+                $knownRunner = [bool]($testScript -match '(?i)\b(jest|vitest|mocha|ava|tap)\b|\bnode\s+--test\b|\btsx\b.*--test')
+                $supportedFiles = @($group.Group | Where-Object { [string]$_.testFile -match '(?i)\.(ts|tsx|js|jsx|mjs|cjs)$' }).Count -eq @($group.Group).Count
+                if (-not $testScript -or -not $knownRunner -or -not $supportedFiles) { $canRunFocused = $false; break }
+            }
+        }
+        if ($canRunFocused) {
+            foreach ($group in $focusedGroups) {
+                $packageRoot = [string]$group.Name
+                $workingRoot = if ($packageRoot -eq '.') { $Root } else { Join-Path $Root $packageRoot }
+                $testPaths = @($group.Group | ForEach-Object {
+                    $path = [string]$_.testFile
+                    if ($packageRoot -ne '.') { $path = $path.Substring($packageRoot.Length) -replace '^[\\/]+','' }
+                    $path.Replace('\','/')
+                } | Sort-Object -Unique)
+                $arguments = @('test','--') + $testPaths
+                $check = Invoke-AdosCapturedCommand $workingRoot 'npm' $arguments
+                $name = "npm focused tests: $packageRoot ($($testPaths.Count) files)"
+                $results += New-AdosCheckResult 3 $name $(if ($check.exitCode -eq 0) {'PASS'} else {'FAIL'}) $check.exitCode $check.output
+            }
+            $focusedExecuted = $true
+        }
+        else {
+            if (-not $focusedSelection.mapCurrent) { $focusedFallback = 'test map missing or stale' }
+            elseif ($focusedCandidates.Count -eq 0) { $focusedFallback = 'no associated tests for changed files' }
+            elseif ($focusedCandidates.Count -gt 12) { $focusedFallback = 'more than 12 focused tests; full suite is safer' }
+            else { $focusedFallback = 'package test runner is not safely recognized for path filtering' }
+        }
+        if (-not $focusedExecuted -and (Test-Path -LiteralPath $packagePath)) {
             try {
                 $package = Get-Content -LiteralPath $packagePath -Raw | ConvertFrom-Json
                 if ($package.scripts -and $package.scripts.test) {
@@ -331,11 +414,17 @@ function Invoke-AdosVerification {
     $failures = @($results | Where-Object { $_.status -eq 'FAIL' })
     $status = if ($failures.Count -eq 0) { 'PASS' } else { 'FAIL' }
     $payload = [ordered]@{
-        schemaVersion = 1
+        schemaVersion = 2
         generated = (Get-Date -Format o)
         status = $status
         maxLevel = $Limit
         durationMs = $timer.ElapsedMilliseconds
+        focusedTests = [ordered]@{
+            mapCurrent = [bool]$focusedSelection.mapCurrent
+            candidates = @($focusedSelection.candidates)
+            executed = $focusedExecuted
+            fallback = $focusedFallback
+        }
         checks = @($results)
     }
     $jsonPath = Join-Path $Root '.ai\evidence\verification.generated.json'
@@ -459,6 +548,10 @@ function Write-AdosPrEvidenceSummary {
     $passedChecks = @($checks | Where-Object { [string]$_.status -eq 'PASS' }).Count
     $failedChecks = @($checks | Where-Object { [string]$_.status -eq 'FAIL' }).Count
     $skippedChecks = @($checks | Where-Object { [string]$_.status -eq 'SKIP' }).Count
+    $focusedTests = [ordered]@{ mapCurrent=$false; candidates=@(); executed=$false; fallback='' }
+    if ($verification -and @($verification.PSObject.Properties.Name) -contains 'focusedTests' -and $verification.focusedTests) {
+        $focusedTests = $verification.focusedTests
+    }
     $requirements = @()
     if ($gate -and $gate.requirements) { $requirements = @($gate.requirements) }
 
@@ -481,7 +574,7 @@ function Write-AdosPrEvidenceSummary {
     }
 
     $payload = [ordered]@{
-        schemaVersion = 1
+        schemaVersion = 2
         generated = (Get-Date -Format o)
         status = $status
         reason = $reason
@@ -505,6 +598,7 @@ function Write-AdosPrEvidenceSummary {
             passed = $passedChecks
             failed = $failedChecks
             skipped = $skippedChecks
+            focusedTests = $focusedTests
             checks = @($checks)
         }
         requirements = @($requirements)
@@ -526,7 +620,9 @@ function Write-AdosPrEvidenceSummary {
         "- Protected files: $($scopeProtected.Count)",'','### Verification','',
         "- Result: $($payload.verification.status)",
         "- Maximum level: $($payload.verification.maxLevel)",
-        "- Checks: $passedChecks passed, $failedChecks failed, $skippedChecks skipped",'',
+        "- Checks: $passedChecks passed, $failedChecks failed, $skippedChecks skipped",
+        "- Focused tests executed: $([bool]$focusedTests.executed)",
+        "- Focused candidates: $(@($focusedTests.candidates).Count)",'',
         '| Level | Check | Result |','|---:|---|---|'
     )
     foreach ($check in @($checks | Select-Object -First 50)) {

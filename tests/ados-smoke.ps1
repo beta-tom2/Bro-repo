@@ -40,6 +40,11 @@ Write-FixtureFile 'README.md' ("# ADOS smoke fixture`r`n" + ('large optional doc
 Write-FixtureFile 'src\friends.ts' "// friend request`r`nexport function sendFriendRequest(userId: string): string { return userId; }`r`n"
 Write-FixtureFile 'src\friends-copy.ts' "// friend request`r`nexport function sendFriendRequest(userId: string): string { return userId; }`r`n"
 Write-FixtureFile 'tests\friends.test.ts' "import { sendFriendRequest } from '../src/friends';`r`n"
+Write-FixtureFile 'packages\social\package.json' '{"name":"social","type":"module","scripts":{"test":"node --test"}}'
+Write-FixtureFile 'packages\social\src\friends.js' "export function normalizeFriend(value) { return value.trim(); }`r`n"
+Write-FixtureFile 'packages\social\tests\friends.test.js' "import test from 'node:test';`r`nimport assert from 'node:assert/strict';`r`nimport { normalizeFriend } from '../src/friends.js';`r`ntest('normalizes a friend', () => assert.equal(normalizeFriend(' Ada '), 'Ada'));`r`n"
+Write-FixtureFile 'packages\admin\package.json' '{"name":"admin","type":"module"}'
+Write-FixtureFile 'packages\admin\tests\friends.test.js' "// normalizeFriend belongs to another workspace and must not create a cross-package association.`r`n"
 Write-FixtureFile 'docs\adr\ADR-0001-friend-service.md' "# ADR-0001 Friend service boundary`r`n`r`nStatus: accepted`r`n`r`nFriend requests remain in the friend service.`r`n"
 Write-FixtureFile 'docs\project-brain\README.md' "# Project Brain`r`n"
 Write-FixtureFile 'docs\project-brain\CURRENT_FOCUS.md' "# Current focus`r`nFriend request safety.`r`n"
@@ -67,8 +72,13 @@ $Ados = Join-Path $RepoRoot 'ados.ps1'
 $first = Read-Json '.ai\index\hash-index.generated.json'
 Assert-True ($first.stats.updated -ge 4) 'first index pass must analyze fixture files'
 Assert-True ((Read-Json '.ai\index\symbol-index.generated.json').symbolCount -ge 1) 'symbol index must find sendFriendRequest'
+$testMap = Read-Json '.ai\index\test-symbol-map.generated.json'
+Assert-True (@($testMap.associations | Where-Object { $_.sourceFile -eq 'src\friends.ts' -and $_.testFile -eq 'tests\friends.test.ts' }).Count -eq 1) 'test map must connect a relative import to its source'
+Assert-True (@($testMap.associations | Where-Object { $_.sourceFile -eq 'packages\social\src\friends.js' -and $_.testFile -eq 'packages\social\tests\friends.test.js' }).Count -eq 1) 'test map must preserve monorepo package associations'
+Assert-True (@($testMap.associations | Where-Object { $_.sourceFile -eq 'packages\social\src\friends.js' -and $_.testFile -eq 'packages\admin\tests\friends.test.js' }).Count -eq 0) 'test map must reject ambiguous cross-package symbol matches'
 Assert-True ((Read-Json '.ai\context\elastic-context.generated.json').selectedFiles.Count -ge 1) 'elastic context must select files'
 $initialElastic = Read-Json '.ai\context\elastic-context.generated.json'
+Assert-True (@($initialElastic.associatedTestFiles) -contains 'tests\friends.test.ts') 'elastic context must select the focused test associated with a relevant source'
 Assert-True (@($initialElastic.selectedFiles.path) -contains 'docs\project-brain\README.md') 'elastic context must prioritize repository entrypoints'
 Assert-True (@($initialElastic.selectedFiles.path) -notcontains 'README.md') 'oversized optional README must not consume elastic context budget'
 Assert-True (@($initialElastic.skippedBaseFiles.path) -contains 'README.md') 'elastic context must report the skipped oversized README'
@@ -82,6 +92,17 @@ Assert-True ([long]$initialElastic.duplicateBytesAvoided -gt 0) 'elastic context
 $second = Read-Json '.ai\index\hash-index.generated.json'
 Assert-True ($second.stats.updated -eq 0) 'second index pass must not reanalyze unchanged files'
 Assert-True ($second.stats.reused -eq $second.stats.scanned) 'second index pass must reuse every scanned file'
+
+Write-FixtureFile 'packages\social\src\friends.js' "// focused verification change`r`nexport function normalizeFriend(value) { return value.trim(); }`r`n"
+& $Ados verify -ProjectPath $ResolvedFixture -Task 'Verify social friend normalization' -AllowedScope @('packages\social') -MaxVerificationLevel 3 -RequireDiff $true -MaxFiles 100
+$focusedVerification = Read-Json '.ai\evidence\verification.generated.json'
+Assert-True ($focusedVerification.focusedTests.mapCurrent) 'verification must use a test map matching the current worktree'
+Assert-True ($focusedVerification.focusedTests.executed) 'verification must execute bounded focused tests for a recognized package runner'
+Assert-True (@($focusedVerification.checks | Where-Object { $_.name -match '^npm focused tests:' -and $_.status -eq 'PASS' }).Count -eq 1) 'focused package test must pass'
+Assert-True ((Read-Json '.ai\evidence\pr-evidence-summary.generated.json').verification.focusedTests.executed) 'PR evidence must preserve focused-test execution'
+Push-Location $ResolvedFixture
+try { & git restore -- packages\social\src\friends.js }
+finally { Pop-Location }
 
 Push-Location $ResolvedFixture
 try { $statusBeforeStart = (& git status --porcelain=v1 | Out-String).TrimEnd() }
