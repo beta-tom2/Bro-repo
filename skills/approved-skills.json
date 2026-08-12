@@ -1,5 +1,5 @@
 {
-  "version": 3,
+  "version": 4,
   "policy": {
     "defaultMode": "selective",
     "thirdPartyDefault": "deny-until-audited",
@@ -10,8 +10,19 @@
   "skills": [
     {"name":"albert-skill-router","source":"beta-tom2/albert-devcore","status":"approved","scope":["all-dev-projects"],"trigger":"medium-or-higher development work or specialized routing"},
     {"name":"albert-architecture-review","source":"beta-tom2/albert-devcore","status":"approved","scope":["architecture"],"trigger":"broad architecture friction review; not tiny refactors"},
+    {"name":"albert-design-director","source":"beta-tom2/albert-devcore","status":"approved","scope":["ui","ux","frontend","motion","web","mobile"],"trigger":"meaningful application or website UI/design/motion work"},
     {"name":"find-skills","source":"vercel-labs/skills","status":"approved","scope":["meta"],"trigger":"skill discovery only"},
-    {"name":"frontend-design","source":"anthropics/skills","status":"approved","scope":["ui","ux","frontend"],"trigger":"new or substantial user-facing design work"},
+
+    {"name":"frontend-design","source":"anthropics/skills","status":"approved-under-wrapper","scope":["ui","ux","frontend"],"trigger":"new or substantial user-facing design direction via albert-design-director"},
+    {"name":"impeccable","source":"pbakaus/impeccable","status":"approved-under-wrapper","scope":["ui","ux","frontend","quality"],"trigger":"design critique, audit, polish, hardening, responsive or anti-pattern cleanup via albert-design-director"},
+    {"name":"design-taste-frontend","source":"Leonxlnx/taste-skill","status":"conditional-experimental","scope":["ui","ux","frontend","creative"],"trigger":"explicit need for higher visual variance or creative reset via albert-design-director","reason":"upstream v2 is experimental; use as proposal generator, not default authority"},
+    {"name":"emil-design-eng","source":"emilkowalski/skills","status":"approved-under-wrapper","scope":["ui","motion","design-engineering"],"trigger":"design-engineering judgment where motion and interface details interact"},
+    {"name":"animate","source":"emilkowalski/skills","status":"approved-under-wrapper","scope":["motion"],"trigger":"specific interaction needs a new animation from scratch"},
+    {"name":"find-animation-opportunities","source":"emilkowalski/skills","status":"approved-under-wrapper","scope":["motion"],"trigger":"discover only genuinely useful animation opportunities"},
+    {"name":"improve-animations","source":"emilkowalski/skills","status":"approved-under-wrapper","scope":["motion","audit"],"trigger":"broad read-only animation audit and implementation planning"},
+    {"name":"review-animations","source":"emilkowalski/skills","status":"approved-under-wrapper","scope":["motion","review"],"trigger":"strict review after animation implementation or on an existing animation diff"},
+    {"name":"apple-design","source":"emilkowalski/skills","status":"conditional","scope":["motion","apple","ios-inspired"],"trigger":"Apple-like fluid interaction principles are specifically relevant"},
+
     {"name":"expo-native-ui","source":"expo/skills","status":"approved","scope":["expo","react-native","ui"],"trigger":"native UI implementation"},
     {"name":"expo-data-fetching","source":"expo/skills","status":"approved","scope":["expo","react-native","data"],"trigger":"native data fetching or caching work"},
     {"name":"expo-upgrade","source":"expo/skills","status":"approved","scope":["expo"],"trigger":"Expo upgrade or compatibility work"},
