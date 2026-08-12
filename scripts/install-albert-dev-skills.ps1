@@ -26,7 +26,9 @@ function Invoke-SkillInstall {
     }
 }
 
-$approvedExternal = @(
+$approvedSkills = @(
+    @{ Source = "https://github.com/beta-tom2/albert-devcore"; Skill = "albert-skill-router" },
+    @{ Source = "https://github.com/beta-tom2/albert-devcore"; Skill = "albert-architecture-review" },
     @{ Source = "https://github.com/vercel-labs/skills"; Skill = "find-skills" },
     @{ Source = "https://github.com/anthropics/skills"; Skill = "frontend-design" },
     @{ Source = "https://github.com/expo/skills"; Skill = "building-native-ui" },
@@ -44,19 +46,20 @@ $approvedExternal = @(
     @{ Source = "https://github.com/mattpocock/skills"; Skill = "improve-codebase-architecture" }
 )
 
-foreach ($entry in $approvedExternal) {
+foreach ($entry in $approvedSkills) {
     Invoke-SkillInstall -Source $entry.Source -Skill $entry.Skill
 }
 
 if ($ProjectPath) {
     $resolvedProject = (Resolve-Path $ProjectPath).Path
-    $routerSource = Join-Path $DevCoreRoot "skills\albert-skill-router"
-    $routerTarget = Join-Path $resolvedProject ".agents\skills\albert-skill-router"
-
-    Write-Host "[router] $routerTarget"
-    if (-not $DryRun) {
-        New-Item -ItemType Directory -Force -Path $routerTarget | Out-Null
-        Copy-Item -Path (Join-Path $routerSource "*") -Destination $routerTarget -Recurse -Force
+    foreach ($localSkill in @("albert-skill-router", "albert-architecture-review")) {
+        $skillSource = Join-Path $DevCoreRoot ("skills\" + $localSkill)
+        $skillTarget = Join-Path $resolvedProject (".agents\skills\" + $localSkill)
+        Write-Host "[project-skill] $skillTarget"
+        if (-not $DryRun) {
+            New-Item -ItemType Directory -Force -Path $skillTarget | Out-Null
+            Copy-Item -Path (Join-Path $skillSource "*") -Destination $skillTarget -Recurse -Force
+        }
     }
 }
 
