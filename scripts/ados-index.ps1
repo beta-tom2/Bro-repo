@@ -257,6 +257,13 @@ function Get-AdosContextEntrypoints {
     return @($entrypoints | Where-Object { $_ } | ForEach-Object { ([string]$_).Replace('/', '\') } | Sort-Object -Unique)
 }
 
+function Get-AdosSelectionHash {
+    param([string]$Path)
+
+    try { return (Get-FileHash -LiteralPath $Path -Algorithm SHA256 -ErrorAction Stop).Hash.ToLowerInvariant() }
+    catch { return '' }
+}
+
 function Invoke-AdosElasticContext {
     param([string]$Root, [string]$TaskText, [string]$RequestedTier, $HashIndex, $SymbolIndex)
 
@@ -281,6 +288,9 @@ function Invoke-AdosElasticContext {
 
     $selected = @()
     $skippedBaseFiles = @()
+    $skippedDuplicateFiles = @()
+    $selectedHashOwners = @{}
+    $duplicateBytesAvoided = 0
     $used = 0
     foreach ($base in ($requiredBaseFiles + $baseFiles + $optionalBaseFiles)) {
         $full = Join-Path $Root $base
@@ -291,10 +301,17 @@ function Invoke-AdosElasticContext {
                 $skippedBaseFiles += [pscustomobject]@{ path=$base; bytes=[long]$size; reason="optional base file exceeds $maxOptionalBaseBytes byte cap" }
                 continue
             }
+            $hash = Get-AdosSelectionHash $full
+            if ($hash -and $selectedHashOwners.ContainsKey($hash)) {
+                $skippedDuplicateFiles += [pscustomobject]@{ path=$base; bytes=[long]$size; duplicateOf=[string]$selectedHashOwners[$hash] }
+                $duplicateBytesAvoided += [long]$size
+                continue
+            }
             if (($used + $size) -le $budget) {
                 $reason = if ($entrypoints -contains $base) { 'repository entrypoint' } else { 'base context' }
                 $selected += [pscustomobject]@{ path=$base; bytes=[long]$size; score=1000; reason=$reason }
                 $used += $size
+                if ($hash) { $selectedHashOwners[$hash] = $base }
             }
         }
     }
@@ -312,11 +329,19 @@ function Invoke-AdosElasticContext {
         $size = [long]$candidate.entry.bytes
         if (@($selected | Where-Object { [string]$_.path -eq $path }).Count -gt 0) { continue }
         if (@($skippedBaseFiles | Where-Object { [string]$_.path -eq $path }).Count -gt 0) { continue }
+        $full = Join-Path $Root $path
+        $hash = Get-AdosSelectionHash $full
+        if ($hash -and $selectedHashOwners.ContainsKey($hash)) {
+            $skippedDuplicateFiles += [pscustomobject]@{ path=$path; bytes=$size; duplicateOf=[string]$selectedHashOwners[$hash] }
+            $duplicateBytesAvoided += $size
+            continue
+        }
         if (($used + $size) -gt $budget) { continue }
         $reason = 'task term or symbol match'
         if ($changed -contains $path) { $reason = 'changed file' }
         $selected += [pscustomobject]@{ path=$path; bytes=$size; score=$candidate.score; reason=$reason }
         $used += $size
+        if ($hash) { $selectedHashOwners[$hash] = $path }
     }
 
     $totalBytes = [long]$HashIndex.stats.totalBytes
@@ -335,6 +360,8 @@ function Invoke-AdosElasticContext {
         terms = @($terms)
         selectedFiles = @($selected)
         skippedBaseFiles = @($skippedBaseFiles)
+        skippedDuplicateFiles = @($skippedDuplicateFiles)
+        duplicateBytesAvoided = [long]$duplicateBytesAvoided
     }
     $jsonPath = Join-Path $Root '.ai\context\elastic-context.generated.json'
     Write-AdosJson $jsonPath $payload 10
@@ -345,11 +372,15 @@ function Invoke-AdosElasticContext {
     )
     foreach ($item in $selected) { $lines += "- ``$($item.path)`` - $($item.bytes) bytes - $($item.reason)" }
     if ($selected.Count -eq 0) { $lines += '- none' }
+    $lines += @('','## Skipped duplicate files')
+    foreach ($item in $skippedDuplicateFiles) { $lines += "- ``$($item.path)`` - $($item.bytes) bytes - duplicates ``$($item.duplicateOf)``" }
+    if ($skippedDuplicateFiles.Count -eq 0) { $lines += '- none' }
+    $lines += "Duplicate bytes avoided: $duplicateBytesAvoided"
     $lines += @('','## Skipped oversized base files')
     foreach ($item in $skippedBaseFiles) { $lines += "- ``$($item.path)`` - $($item.bytes) bytes - $($item.reason)" }
     if ($skippedBaseFiles.Count -eq 0) { $lines += '- none' }
     Write-AdosUtf8 (Join-Path $Root '.ai\context\elastic-context.generated.md') ($lines -join "`r`n")
-    Add-AdosUsageEvent $Root 'elastic-context' 'PASS' 0 $totalBytes $used @{ tier=$tier; files=$selected.Count; reductionPercent=$reduction }
+    Add-AdosUsageEvent $Root 'elastic-context' 'PASS' 0 $totalBytes $used @{ tier=$tier; files=$selected.Count; reductionPercent=$reduction; duplicateFiles=$skippedDuplicateFiles.Count; duplicateBytesAvoided=$duplicateBytesAvoided }
     Write-Host "Elastic context written to $jsonPath ($tier, $used of $budget bytes)"
     return $payload
 }

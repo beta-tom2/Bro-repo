@@ -37,7 +37,8 @@ function Read-Json([string]$Relative) {
 }
 
 Write-FixtureFile 'README.md' ("# ADOS smoke fixture`r`n" + ('large optional documentation ' * 5000))
-Write-FixtureFile 'src\friends.ts' "export function sendFriendRequest(userId: string): string { return userId; }`r`n"
+Write-FixtureFile 'src\friends.ts' "// friend request`r`nexport function sendFriendRequest(userId: string): string { return userId; }`r`n"
+Write-FixtureFile 'src\friends-copy.ts' "// friend request`r`nexport function sendFriendRequest(userId: string): string { return userId; }`r`n"
 Write-FixtureFile 'tests\friends.test.ts' "import { sendFriendRequest } from '../src/friends';`r`n"
 Write-FixtureFile 'docs\adr\ADR-0001-friend-service.md' "# ADR-0001 Friend service boundary`r`n`r`nStatus: accepted`r`n`r`nFriend requests remain in the friend service.`r`n"
 Write-FixtureFile 'docs\project-brain\README.md' "# Project Brain`r`n"
@@ -70,6 +71,11 @@ $initialElastic = Read-Json '.ai\context\elastic-context.generated.json'
 Assert-True (@($initialElastic.selectedFiles.path) -contains 'docs\project-brain\README.md') 'elastic context must prioritize repository entrypoints'
 Assert-True (@($initialElastic.selectedFiles.path) -notcontains 'README.md') 'oversized optional README must not consume elastic context budget'
 Assert-True (@($initialElastic.skippedBaseFiles.path) -contains 'README.md') 'elastic context must report the skipped oversized README'
+$selectedFriendCopies = @($initialElastic.selectedFiles.path | Where-Object { $_ -match '^src\\friends(?:-copy)?\.ts$' })
+$skippedFriendCopies = @($initialElastic.skippedDuplicateFiles.path | Where-Object { $_ -match '^src\\friends(?:-copy)?\.ts$' })
+Assert-True ($selectedFriendCopies.Count -eq 1) 'elastic context must select only one copy of identical source content'
+Assert-True ($skippedFriendCopies.Count -eq 1) 'elastic context must report the skipped duplicate source file'
+Assert-True ([long]$initialElastic.duplicateBytesAvoided -gt 0) 'elastic context must report duplicate bytes avoided'
 
 & $Index index -ProjectPath $ResolvedFixture -MaxFiles 100
 $second = Read-Json '.ai\index\hash-index.generated.json'
@@ -87,6 +93,10 @@ Assert-True ($statusBeforeStart -eq $statusAfterStart) 'ADOS start must keep gen
 $packet = Get-Content -LiteralPath (Join-Path $ResolvedFixture '.ai\context\prompt-packet.generated.md') -Raw
 Assert-True ($packet -match 'docs\\project-brain\\README.md') 'prompt packet must include the Project Brain entrypoint'
 Assert-True ($packet -match 'README.md \(over .* optional-base cap\)') 'prompt packet must report the oversized root README instead of selecting it'
+$packetSelectedBlock = (($packet -split '## Selected files',2)[1] -split '## Skipped duplicate files',2)[0]
+$packetFriendCopies = @($packetSelectedBlock -split "`r?`n" | Where-Object { $_ -match 'src\\friends(?:-copy)?\.ts' })
+Assert-True ($packetFriendCopies.Count -eq 1) 'prompt packet must select only one copy of identical source content'
+Assert-True ($packet -match 'duplicates src\\friends(?:-copy)?\.ts') 'prompt packet must report which duplicate source file was skipped'
 $sessionContext = Get-Content -LiteralPath (Join-Path $ResolvedFixture '.ai\context\session-context.md') -Raw
 Assert-True ($sessionContext.IndexOf('docs\project-brain\README.md') -lt $sessionContext.IndexOf('README.md when task-relevant')) 'session context must route Project Brain before the optional root README'
 

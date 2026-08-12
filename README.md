@@ -104,7 +104,7 @@ ADOS orchestrates DevCore, incremental indexes, project memory, verification evi
 - Handoff: creates a resumable continuation packet.
 - Incremental Hash Index: hashes source files and reuses imports and symbols when content did not change.
 - Symbol Index: maps functions, classes, types, and other language-level declarations to files and lines.
-- Elastic Context: chooses a small, medium, large, or protected context budget from task risk and expands only when needed.
+- Elastic Context: chooses a risk-based budget, prioritizes repository entrypoints, and removes duplicate file content by SHA-256.
 - Error Fingerprinting: normalizes failures into stable local signatures and recurrence counts.
 - Regression Memory: links bugs, related files, and approved deterministic regression commands.
 - ADR and Negative Memory: retrieves accepted decisions and rejected approaches relevant to the current task.

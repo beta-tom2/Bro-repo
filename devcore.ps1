@@ -287,6 +287,13 @@ function Get-ContextEntrypoints {
     return @($entrypoints | Where-Object { $_ } | ForEach-Object { ([string]$_).Replace('/', '\') } | Sort-Object -Unique)
 }
 
+function Get-SelectionHash {
+    param([string]$Path)
+
+    try { return (Get-FileHash -LiteralPath $Path -Algorithm SHA256 -ErrorAction Stop).Hash.ToLowerInvariant() }
+    catch { return '' }
+}
+
 function Invoke-Packet {
     param([string]$Path,[string]$TaskText,[int]$Budget)
     if (-not $TaskText) { throw 'Task is required for packet.' }
@@ -310,18 +317,34 @@ function Invoke-Packet {
         $optionalBaseFiles = @('README.md')
         $maxOptionalBaseBytes = [long]($Budget / 4)
         $skippedBaseFiles = New-Object Collections.Generic.List[string]
+        $skippedDuplicateFiles = New-Object Collections.Generic.List[object]
+        $selectedHashOwners = @{}
+        $duplicateBytesAvoided = 0
         $selected = New-Object Collections.Generic.List[string]
         $used = 0
         foreach ($item in ($baseFiles + $optionalBaseFiles + @($candidateFiles))) {
             $full = Join-Path $root $item
             if (Test-Path $full -PathType Leaf) {
                 $size = (Get-Item $full).Length
+                if ($selected -contains $item) { continue }
                 if ($optionalBaseFiles -contains $item -and $size -gt $maxOptionalBaseBytes) {
                     if ($skippedBaseFiles -notcontains $item) { $skippedBaseFiles.Add($item) }
                     continue
                 }
                 if ($skippedBaseFiles -contains $item) { continue }
-                if (($used + $size) -le $Budget -and $selected -notcontains $item) { $selected.Add($item); $used += $size }
+                $hash = Get-SelectionHash $full
+                if ($hash -and $selectedHashOwners.ContainsKey($hash)) {
+                    if (@($skippedDuplicateFiles | Where-Object { [string]$_.path -eq $item }).Count -eq 0) {
+                        $skippedDuplicateFiles.Add([pscustomobject]@{ path=$item; bytes=[long]$size; duplicateOf=[string]$selectedHashOwners[$hash] })
+                        $duplicateBytesAvoided += [long]$size
+                    }
+                    continue
+                }
+                if (($used + $size) -le $Budget) {
+                    $selected.Add($item)
+                    $used += $size
+                    if ($hash) { $selectedHashOwners[$hash] = $item }
+                }
             }
         }
         $lines = New-Object Collections.Generic.List[string]
@@ -329,6 +352,10 @@ function Invoke-Packet {
         $lines.Add("Generated: $(Get-Date -Format o)"); $lines.Add("Route: $route"); $lines.Add("Budget bytes: $Budget"); $lines.Add("Selected bytes: $used"); $lines.Add('')
         $lines.Add('## Task'); $lines.Add($TaskText); $lines.Add(''); $lines.Add('## Selected files')
         foreach ($item in $selected) { $lines.Add("- $item") }
+        $lines.Add(''); $lines.Add('## Skipped duplicate files')
+        if ($skippedDuplicateFiles.Count -eq 0) { $lines.Add('- none') }
+        else { foreach ($item in $skippedDuplicateFiles) { $lines.Add("- $($item.path) ($($item.bytes) bytes; duplicates $($item.duplicateOf))") } }
+        $lines.Add("Duplicate bytes avoided: $duplicateBytesAvoided")
         $lines.Add(''); $lines.Add('## Skipped oversized base files')
         if ($skippedBaseFiles.Count -eq 0) { $lines.Add('- none') }
         else { foreach ($item in $skippedBaseFiles) { $lines.Add("- $item (over $maxOptionalBaseBytes byte optional-base cap)") } }

@@ -69,7 +69,7 @@ Captures branch, commit, working tree, generated context, checks, task route, an
 Every supported source file receives a SHA-256 content hash. Unchanged records reuse prior import and symbol analysis. The symbol index stores declarations with kind, file, and line; it is deterministic and requires no embeddings or hosted database.
 
 ### Elastic Context
-Task risk selects a 30 KB small, 90 KB medium, 180 KB large, or 240 KB protected budget. Repository rules and adapter-provided context entrypoints are selected before changed files, exact path terms, symbol names, and imports. Optional base documents such as a large root README cannot consume more than one quarter of the tier budget. Skipped oversized base files remain visible in the generated report. Generated maps remain navigation aids and source remains authoritative.
+Task risk selects a 30 KB small, 90 KB medium, 180 KB large, or 240 KB protected budget. Repository rules and adapter-provided context entrypoints are selected before changed files, exact path terms, symbol names, and imports. Optional base documents such as a large root README cannot consume more than one quarter of the tier budget. Selected files are deduplicated using their current SHA-256 content hash, while skipped duplicates and oversized base files remain visible in the generated report. Generated maps remain navigation aids and source remains authoritative.
 
 ### Quality gates
 Scope Guard compares changes against the pre-task checkpoint and allowed paths. Verification Ladder records bounded levels from patch integrity through build checks. Evidence Gate returns `UNVERIFIED` unless the required diff, verification result, scope result, and secret-pattern check all pass.
