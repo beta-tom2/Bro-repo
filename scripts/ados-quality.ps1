@@ -450,13 +450,17 @@ function Write-AdosPrEvidenceSummary {
         else { 'Evidence Gate is VERIFIED and matches the current repository state.' }
 
     $files = @(Get-AdosEvidenceFiles $Root)
-    $scopeOutside = if ($scope -and $scope.outsideScope) { @($scope.outsideScope) } else { @() }
-    $scopeProtected = if ($scope -and $scope.protectedFiles) { @($scope.protectedFiles) } else { @() }
-    $checks = if ($verification -and $verification.checks) { @($verification.checks) } else { @() }
+    $scopeOutside = @()
+    if ($scope -and $scope.outsideScope) { $scopeOutside = @($scope.outsideScope) }
+    $scopeProtected = @()
+    if ($scope -and $scope.protectedFiles) { $scopeProtected = @($scope.protectedFiles) }
+    $checks = @()
+    if ($verification -and $verification.checks) { $checks = @($verification.checks) }
     $passedChecks = @($checks | Where-Object { [string]$_.status -eq 'PASS' }).Count
     $failedChecks = @($checks | Where-Object { [string]$_.status -eq 'FAIL' }).Count
     $skippedChecks = @($checks | Where-Object { [string]$_.status -eq 'SKIP' }).Count
-    $requirements = if ($gate -and $gate.requirements) { @($gate.requirements) } else { @() }
+    $requirements = @()
+    if ($gate -and $gate.requirements) { $requirements = @($gate.requirements) }
 
     $benchmarkSummary = $null
     if ($benchmark) {
