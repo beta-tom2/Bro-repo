@@ -28,7 +28,7 @@
 
 ## Next
 
-- [ ] compiler-backed reference resolution when a project already provides a language server;
+- [x] bounded compiler-backed reference resolution when a project already provides local TypeScript;
 - [ ] optional Windows Task Scheduler installation for Night Mode, requiring explicit user authorization;
 - [x] project-owned health thresholds and bounded local trend baselines;
 - [x] richer test-to-symbol association for monorepos with bounded focused-test execution;

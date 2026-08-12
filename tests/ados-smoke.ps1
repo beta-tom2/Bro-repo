@@ -43,6 +43,7 @@ Write-FixtureFile 'tests\friends.test.ts' "import { sendFriendRequest } from '..
 Write-FixtureFile 'packages\social\package.json' '{"name":"social","type":"module","scripts":{"test":"node --test"}}'
 Write-FixtureFile 'packages\social\src\friends.js' "export function normalizeFriend(value) { return value.trim(); }`r`n"
 Write-FixtureFile 'packages\social\tests\friends.test.js' "import test from 'node:test';`r`nimport assert from 'node:assert/strict';`r`nimport { normalizeFriend } from '../src/friends.js';`r`ntest('normalizes a friend', () => assert.equal(normalizeFriend(' Ada '), 'Ada'));`r`n"
+Write-FixtureFile 'packages\social\tsconfig.json' '{"compilerOptions":{"allowJs":true,"checkJs":false,"module":"NodeNext","moduleResolution":"NodeNext"},"include":["src/**/*.js","tests/**/*.js"]}'
 Write-FixtureFile 'packages\admin\package.json' '{"name":"admin","type":"module"}'
 Write-FixtureFile 'packages\admin\tests\friends.test.js' "// normalizeFriend belongs to another workspace and must not create a cross-package association.`r`n"
 Write-FixtureFile 'docs\adr\ADR-0001-friend-service.md' "# ADR-0001 Friend service boundary`r`n`r`nStatus: accepted`r`n`r`nFriend requests remain in the friend service.`r`n"
@@ -73,6 +74,9 @@ $first = Read-Json '.ai\index\hash-index.generated.json'
 Assert-True ($first.stats.updated -ge 4) 'first index pass must analyze fixture files'
 Assert-True ((Read-Json '.ai\index\symbol-index.generated.json').symbolCount -ge 1) 'symbol index must find sendFriendRequest'
 $testMap = Read-Json '.ai\index\test-symbol-map.generated.json'
+$compilerReferences = Read-Json '.ai\index\compiler-references.generated.json'
+Assert-True (@('PASS','PARTIAL','SKIP') -contains $compilerReferences.status) 'compiler resolver must remain optional and bounded'
+Assert-True ($compilerReferences.status -eq 'SKIP') 'fixture without project-local TypeScript must use the lexical fallback'
 Assert-True (@($testMap.associations | Where-Object { $_.sourceFile -eq 'src\friends.ts' -and $_.testFile -eq 'tests\friends.test.ts' }).Count -eq 1) 'test map must connect a relative import to its source'
 Assert-True (@($testMap.associations | Where-Object { $_.sourceFile -eq 'packages\social\src\friends.js' -and $_.testFile -eq 'packages\social\tests\friends.test.js' }).Count -eq 1) 'test map must preserve monorepo package associations'
 Assert-True (@($testMap.associations | Where-Object { $_.sourceFile -eq 'packages\social\src\friends.js' -and $_.testFile -eq 'packages\admin\tests\friends.test.js' }).Count -eq 0) 'test map must reject ambiguous cross-package symbol matches'
@@ -87,6 +91,38 @@ $skippedFriendCopies = @($initialElastic.skippedDuplicateFiles.path | Where-Obje
 Assert-True ($selectedFriendCopies.Count -eq 1) 'elastic context must select only one copy of identical source content'
 Assert-True ($skippedFriendCopies.Count -eq 1) 'elastic context must report the skipped duplicate source file'
 Assert-True ([long]$initialElastic.duplicateBytesAvoided -gt 0) 'elastic context must report duplicate bytes avoided'
+
+$compilerFixture = Join-Path $ResolvedFixture 'node_modules\typescript'
+New-Item -ItemType Directory -Path $compilerFixture -Force | Out-Null
+Write-FixtureFile 'node_modules\typescript\package.json' '{"name":"typescript","version":"0.0.0-ados-fixture","main":"index.js"}'
+$compilerStub = @'
+const path = require('path');
+const root = process.argv[process.argv.indexOf('--root') + 1];
+const source = path.join(root, 'packages', 'social', 'src', 'friends.js');
+const test = path.join(root, 'packages', 'social', 'tests', 'friends.test.js');
+const sourceFile = { fileName: source, getLineAndCharacterOfPosition: () => ({ line: 0, character: 0 }) };
+module.exports = {
+  version: '0.0.0-ados-fixture',
+  sys: { readFile: () => '{}', fileExists: () => true, readDirectory: () => [], directoryExists: () => true, getDirectories: () => [] },
+  readConfigFile: () => ({ config: {} }), parseJsonConfigFileContent: () => ({ fileNames: [source, test], options: {} }),
+  ScriptSnapshot: { fromString: value => value }, createDocumentRegistry: () => ({}), getDefaultLibFilePath: () => '',
+  isFunctionDeclaration: node => node.kind === 'function', isClassDeclaration: () => false, isInterfaceDeclaration: () => false,
+  isTypeAliasDeclaration: () => false, isEnumDeclaration: () => false, isVariableDeclaration: () => false,
+  isMethodDeclaration: () => false, isPropertyDeclaration: () => false, isIdentifier: value => Boolean(value && value.text),
+  forEachChild: (node, visit) => (node.children || []).forEach(visit),
+  createLanguageService: () => ({
+    getProgram: () => ({ getSourceFiles: () => [{ fileName: source, children: [{ kind: 'function', name: { text: 'normalizeFriend', getStart: () => 7 }, children: [] }] }], getSourceFile: () => sourceFile }),
+    getReferencesAtPosition: () => [{ fileName: test, textSpan: { start: 10 }, isWriteAccess: false }], dispose: () => {}
+  })
+};
+'@
+Write-FixtureFile 'node_modules\typescript\index.js' $compilerStub
+& $Index all -ProjectPath $ResolvedFixture -Task 'Fix normalizeFriend behavior' -MaxFiles 100
+$compilerPass = Read-Json '.ai\index\compiler-references.generated.json'
+$compilerMap = Read-Json '.ai\index\test-symbol-map.generated.json'
+Assert-True ($compilerPass.status -eq 'PASS') 'project-local compiler resolver must run when TypeScript is available'
+Assert-True (@($compilerMap.associations | Where-Object { $_.sourceFile -eq 'packages\social\src\friends.js' -and $_.testFile -eq 'packages\social\tests\friends.test.js' -and $_.confidence -eq 'compiler' }).Count -eq 1) 'compiler evidence must strengthen the package-local test association'
+Remove-Item -LiteralPath (Join-Path $ResolvedFixture 'node_modules') -Recurse -Force
 
 & $Index index -ProjectPath $ResolvedFixture -MaxFiles 100
 $second = Read-Json '.ai\index\hash-index.generated.json'
