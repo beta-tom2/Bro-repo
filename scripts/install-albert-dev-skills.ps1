@@ -1,0 +1,64 @@
+param(
+    [string]$ProjectPath = "",
+    [switch]$Global,
+    [switch]$DryRun
+)
+
+$ErrorActionPreference = "Stop"
+$DevCoreRoot = Split-Path -Parent $PSScriptRoot
+
+function Invoke-SkillInstall {
+    param([string]$Source, [string]$Skill)
+
+    $args = @("skills", "add", $Source, "--skill", $Skill, "-y")
+    if ($Global) { $args += "-g" }
+
+    $display = "npx " + ($args -join " ")
+    Write-Host "[skill] $Skill <= $Source"
+    if ($DryRun) {
+        Write-Host "  DRY RUN: $display"
+        return
+    }
+
+    & npx @args
+    if ($LASTEXITCODE -ne 0) {
+        throw "Skill install failed: $Skill from $Source"
+    }
+}
+
+$approvedExternal = @(
+    @{ Source = "https://github.com/vercel-labs/skills"; Skill = "find-skills" },
+    @{ Source = "https://github.com/anthropics/skills"; Skill = "frontend-design" },
+    @{ Source = "https://github.com/expo/skills"; Skill = "building-native-ui" },
+    @{ Source = "https://github.com/expo/skills"; Skill = "native-data-fetching" },
+    @{ Source = "https://github.com/expo/skills"; Skill = "upgrading-expo" },
+    @{ Source = "https://github.com/vercel-labs/agent-skills"; Skill = "vercel-react-native-skills" },
+    @{ Source = "https://github.com/supabase/agent-skills"; Skill = "supabase" },
+    @{ Source = "https://github.com/supabase/agent-skills"; Skill = "supabase-postgres-best-practices" },
+    @{ Source = "https://github.com/obra/superpowers"; Skill = "systematic-debugging" },
+    @{ Source = "https://github.com/obra/superpowers"; Skill = "verification-before-completion" },
+    @{ Source = "https://github.com/mattpocock/skills"; Skill = "tdd" },
+    @{ Source = "https://github.com/mattpocock/skills"; Skill = "codebase-design" },
+    @{ Source = "https://github.com/mattpocock/skills"; Skill = "domain-modeling" },
+    @{ Source = "https://github.com/mattpocock/skills"; Skill = "grilling" },
+    @{ Source = "https://github.com/mattpocock/skills"; Skill = "improve-codebase-architecture" }
+)
+
+foreach ($entry in $approvedExternal) {
+    Invoke-SkillInstall -Source $entry.Source -Skill $entry.Skill
+}
+
+if ($ProjectPath) {
+    $resolvedProject = (Resolve-Path $ProjectPath).Path
+    $routerSource = Join-Path $DevCoreRoot "skills\albert-skill-router"
+    $routerTarget = Join-Path $resolvedProject ".agents\skills\albert-skill-router"
+
+    Write-Host "[router] $routerTarget"
+    if (-not $DryRun) {
+        New-Item -ItemType Directory -Force -Path $routerTarget | Out-Null
+        Copy-Item -Path (Join-Path $routerSource "*") -Destination $routerTarget -Recurse -Force
+    }
+}
+
+Write-Host "Albert Dev Skills installation plan completed."
+Write-Host "Policy remains selective: installed does not mean always invoked."
