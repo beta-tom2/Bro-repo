@@ -1,5 +1,5 @@
 {
-  "version": 1,
+  "version": 2,
   "policy": {
     "defaultMode": "selective",
     "thirdPartyDefault": "deny-until-audited",
@@ -9,6 +9,7 @@
   },
   "skills": [
     {"name":"albert-skill-router","source":"beta-tom2/albert-devcore","status":"approved","scope":["all-dev-projects"],"trigger":"medium-or-higher development work or specialized routing"},
+    {"name":"albert-architecture-review","source":"beta-tom2/albert-devcore","status":"approved","scope":["architecture"],"trigger":"broad architecture friction review; not tiny refactors"},
     {"name":"find-skills","source":"vercel-labs/skills","status":"approved","scope":["meta"],"trigger":"skill discovery only"},
     {"name":"frontend-design","source":"anthropics/skills","status":"approved","scope":["ui","ux","frontend"],"trigger":"new or substantial user-facing design work"},
     {"name":"building-native-ui","source":"expo/skills","status":"approved","scope":["expo","react-native","ui"],"trigger":"native UI implementation"},
@@ -20,10 +21,10 @@
     {"name":"systematic-debugging","source":"obra/superpowers","status":"approved","scope":["debugging"],"trigger":"unknown or recurring root cause"},
     {"name":"verification-before-completion","source":"obra/superpowers","status":"approved","scope":["verification"],"trigger":"medium, complex, risky, bugfix, or release-adjacent completion"},
     {"name":"tdd","source":"mattpocock/skills","status":"approved","scope":["testing","engineering"],"trigger":"stable behavior can be captured deterministically"},
-    {"name":"codebase-design","source":"mattpocock/skills","status":"approved-as-suite","scope":["architecture"],"trigger":"architecture suite dependency"},
-    {"name":"domain-modeling","source":"mattpocock/skills","status":"approved-as-suite","scope":["architecture","domain"],"trigger":"architecture suite dependency"},
-    {"name":"grilling","source":"mattpocock/skills","status":"approved-as-suite","scope":["architecture","decision"],"trigger":"architecture suite dependency"},
-    {"name":"improve-codebase-architecture","source":"mattpocock/skills","status":"approved-as-suite","scope":["architecture"],"trigger":"broad architecture friction review; not tiny refactors"},
+    {"name":"codebase-design","source":"mattpocock/skills","status":"approved-under-wrapper","scope":["architecture"],"trigger":"albert-architecture-review dependency"},
+    {"name":"domain-modeling","source":"mattpocock/skills","status":"approved-under-wrapper","scope":["architecture","domain"],"trigger":"only when domain terminology or boundaries genuinely need work"},
+    {"name":"grilling","source":"mattpocock/skills","status":"conditional","scope":["decision"],"trigger":"explicit interactive stress-test only","reason":"upstream skill intentionally blocks for repeated user answers; Albert default is nonblocking analysis"},
+    {"name":"improve-codebase-architecture","source":"mattpocock/skills","status":"approved-under-wrapper","scope":["architecture"],"trigger":"albert-architecture-review dependency"},
     {"name":"ai-video-generation","source":"skills-101/superpowers","status":"rejected-for-now","scope":["media"],"trigger":"none","reason":"young fork, external API dependency, not core to current dev workflow"}
   ]
 }
