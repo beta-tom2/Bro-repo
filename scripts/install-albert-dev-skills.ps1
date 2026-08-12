@@ -7,22 +7,34 @@ param(
 $ErrorActionPreference = "Stop"
 $DevCoreRoot = Split-Path -Parent $PSScriptRoot
 
+function Resolve-NpxCommand {
+    $npxCmd = Get-Command npx.cmd -ErrorAction SilentlyContinue
+    if ($npxCmd) { return $npxCmd.Source }
+
+    $npx = Get-Command npx -ErrorAction SilentlyContinue
+    if ($npx) { return $npx.Source }
+
+    throw "npx was not found. Install Node.js/npm or repair PATH before installing skills."
+}
+
+$NpxCommand = Resolve-NpxCommand
+
 function Invoke-SkillInstall {
     param([string]$Source, [string]$Skill)
 
     $args = @("skills", "add", $Source, "--skill", $Skill, "-y")
     if ($Global) { $args += "-g" }
 
-    $display = "npx " + ($args -join " ")
+    $display = ('"' + $NpxCommand + '" ') + ($args -join " ")
     Write-Host "[skill] $Skill <= $Source"
     if ($DryRun) {
         Write-Host "  DRY RUN: $display"
         return
     }
 
-    & npx @args
+    & $NpxCommand @args
     if ($LASTEXITCODE -ne 0) {
-        throw "Skill install failed: $Skill from $Source"
+        throw "Skill install failed: $Skill from $Source (exit code $LASTEXITCODE)"
     }
 }
 
@@ -53,8 +65,8 @@ foreach ($entry in $approvedSkills) {
 if ($ProjectPath) {
     $resolvedProject = (Resolve-Path $ProjectPath).Path
     foreach ($localSkill in @("albert-skill-router", "albert-architecture-review")) {
-        $skillSource = Join-Path $DevCoreRoot ("skills\" + $localSkill)
-        $skillTarget = Join-Path $resolvedProject (".agents\skills\" + $localSkill)
+        $skillSource = Join-Path $DevCoreRoot ("skills\\" + $localSkill)
+        $skillTarget = Join-Path $resolvedProject (".agents\\skills\\" + $localSkill)
         Write-Host "[project-skill] $skillTarget"
         if (-not $DryRun) {
             New-Item -ItemType Directory -Force -Path $skillTarget | Out-Null
