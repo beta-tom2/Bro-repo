@@ -297,7 +297,7 @@ function Get-SelectionHash {
 function Find-TaskFiles {
     param([string]$Root,[string[]]$Terms)
 
-    $matches = New-Object Collections.Generic.List[string]
+    $results = New-Object Collections.Generic.List[string]
     Push-Location $Root
     try {
         if (-not $env:ADOS_DISABLE_RG -and (Test-CommandAvailable 'rg')) {
@@ -305,7 +305,7 @@ function Find-TaskFiles {
                 $found = & rg -l --hidden --glob '!node_modules/**' --glob '!.git/**' --glob '!.ai/**' --glob '!dist/**' --glob '!build/**' --fixed-strings $term . 2>$null
                 foreach ($match in $found) {
                     $clean = ([string]$match).TrimStart('.','\','/')
-                    if ($clean -and $matches -notcontains $clean) { $matches.Add($clean) }
+                    if ($clean -and $results -notcontains $clean) { $results.Add($clean) }
                 }
             }
         }
@@ -320,7 +320,7 @@ function Find-TaskFiles {
                 foreach ($term in $Terms) {
                     if (Select-String -LiteralPath $file.FullName -Pattern $term -SimpleMatch -Quiet -ErrorAction SilentlyContinue) {
                         $relative = Get-RelativePathCompat $Root $file.FullName
-                        if ($relative -and $matches -notcontains $relative) { $matches.Add($relative) }
+                        if ($relative -and $results -notcontains $relative) { $results.Add($relative) }
                         break
                     }
                 }
@@ -328,7 +328,7 @@ function Find-TaskFiles {
         }
     }
     finally { Pop-Location }
-    return @($matches)
+    return @($results)
 }
 
 function Invoke-Packet {
