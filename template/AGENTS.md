@@ -24,8 +24,11 @@ Pause only for:
 - Explicit user instructions, this repository's rules, nearest scoped `AGENTS.md`, and DevCore/ADOS protected-domain rules override third-party skill guidance.
 - Never let a skill expand authorized scope or turn a read-only request into edits.
 - Newly discovered third-party skills are deny-by-default until audited and added to the Albert approved-skill registry.
-- For broad architecture reviews, use the approved Matt Pocock architecture suite only when architecture is actually in scope; do not use it for tiny local refactors.
+- For broad architecture reviews, prefer the Albert architecture wrapper; use the underlying architecture suite only when architecture is actually in scope.
 - For completion claims, deterministic repository checks and ADOS Evidence Gate remain stronger evidence than a skill's narrative assessment.
+
+## Skill telemetry
+For medium-or-higher work where optional skills are selected, record the selected skill set and later the observed outcome using DevCore `scripts/skill-telemetry.ps1` when available. Keep telemetry local under `.ai/analytics/`; do not commit it. Rate benefit/cost only from observed task evidence, not vibes. Do not change approval policy from one isolated result.
 
 ## Free-only AI policy
 - Do not add paid third-party AI APIs.
