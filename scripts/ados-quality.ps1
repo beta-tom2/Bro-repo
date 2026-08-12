@@ -1,0 +1,435 @@
+[CmdletBinding()]
+param(
+    [Parameter(Position = 0, Mandatory = $true)]
+    [ValidateSet('fingerprint','compress','scope','verify','evidence','all')]
+    [string]$Command,
+
+    [Parameter(Mandatory = $true)]
+    [string]$ProjectPath,
+
+    [string]$Task = '',
+    [string]$LogPath = '',
+    [string]$ErrorText = '',
+    [string[]]$AllowedScope = @(),
+    [ValidateRange(1,5)]
+    [int]$MaxLevel = 3,
+    [bool]$RequireDiff = $true
+)
+
+$ErrorActionPreference = 'Stop'
+$Common = Join-Path $PSScriptRoot 'ados-common.ps1'
+. $Common
+
+function Get-AdosErrorFingerprint {
+    param([string]$Text)
+
+    $normalized = ([string]$Text).ToLowerInvariant()
+    $normalized = $normalized -replace '[a-z]:\\[^\r\n:]+', '<path>'
+    $normalized = $normalized -replace '(?<![a-z0-9_])[/\\][^\s:]+', '<path>'
+    $normalized = $normalized -replace '\b[0-9a-f]{40,64}\b', '<hash>'
+    $normalized = $normalized -replace '\b[0-9a-f]{8}-[0-9a-f-]{27,}\b', '<guid>'
+    $normalized = $normalized -replace '(?<=line\s+)\d+', '<line>'
+    $normalized = $normalized -replace ':\d+(?::\d+)?', ':<line>'
+    $normalized = $normalized -replace '\b\d{4,}\b', '<number>'
+    $normalized = $normalized -replace '\s+', ' '
+    $normalized = $normalized.Trim()
+
+    $codes = @([regex]::Matches($normalized, '(?i)\b(?:[a-z]{1,8}\d{3,6}|\d{5}|sqlstate\s*[a-z0-9]+)\b') | ForEach-Object { $_.Value } | Sort-Object -Unique)
+    $signal = @([regex]::Matches($normalized, '[a-z_][a-z0-9_.-]{3,}') | ForEach-Object { $_.Value } |
+        Where-Object { @('error','failed','failure','exception','expected','received','stack','trace','path','line','number') -notcontains $_ } |
+        Group-Object | Sort-Object Count -Descending | Select-Object -First 16 | ForEach-Object { $_.Name })
+    $basis = (($codes + $signal) | Sort-Object -Unique) -join '|'
+    if (-not $basis) { $basis = $normalized.Substring(0, [math]::Min(500, $normalized.Length)) }
+    $hash = Get-AdosTextHash $basis
+    return [pscustomobject]@{
+        id = $hash.Substring(0, 20)
+        basis = $basis
+        codes = @($codes)
+        signals = @($signal)
+    }
+}
+
+function Invoke-AdosFingerprint {
+    param([string]$Root, [string]$Text, [string]$SourcePath, [string]$TaskText)
+
+    if (-not $Text -and $SourcePath) { $Text = Get-Content -LiteralPath $SourcePath -Raw -Encoding UTF8 }
+    if (-not $Text) { throw 'ErrorText or LogPath is required for fingerprint.' }
+    $fingerprint = Get-AdosErrorFingerprint $Text
+    $memoryPath = Join-Path $Root '.ai\memory\error-fingerprints.json'
+    $memory = Read-AdosJson $memoryPath $null
+    $entries = @()
+    if ($memory -and $memory.entries) { $entries = @($memory.entries) }
+    $existing = @($entries | Where-Object { [string]$_.id -eq [string]$fingerprint.id })
+    $firstSeen = Get-Date -Format o
+    $occurrences = 1
+    if ($existing.Count -gt 0) {
+        $firstSeen = [string]$existing[0].firstSeen
+        $occurrences = [int]$existing[0].occurrences + 1
+        $entries = @($entries | Where-Object { [string]$_.id -ne [string]$fingerprint.id })
+    }
+    $entries += [pscustomobject]@{
+        id = $fingerprint.id
+        basis = $fingerprint.basis
+        codes = @($fingerprint.codes)
+        signals = @($fingerprint.signals)
+        task = $TaskText
+        firstSeen = $firstSeen
+        lastSeen = (Get-Date -Format o)
+        occurrences = $occurrences
+        head = Get-AdosHead $Root
+    }
+    Write-AdosJson $memoryPath ([ordered]@{ schemaVersion=1; entries=@($entries | Sort-Object lastSeen -Descending) }) 10
+    $lines = @('# ADOS error fingerprint','',"ID: $($fingerprint.id)","Occurrences: $occurrences",'', '## Codes')
+    $lines += ConvertTo-AdosMarkdownList $fingerprint.codes
+    $lines += @('','## Signals')
+    $lines += ConvertTo-AdosMarkdownList $fingerprint.signals
+    Write-AdosUtf8 (Join-Path $Root '.ai\context\error-fingerprint.generated.md') ($lines -join "`r`n")
+    Write-Host "Error fingerprint: $($fingerprint.id) (occurrence $occurrences)"
+    return $fingerprint
+}
+
+function Invoke-AdosLogCompressor {
+    param([string]$Root, [string]$Path)
+
+    if (-not $Path -or -not (Test-Path -LiteralPath $Path -PathType Leaf)) { throw 'A valid LogPath is required for compress.' }
+    $timer = [Diagnostics.Stopwatch]::StartNew()
+    $lines = @(Get-Content -LiteralPath $Path -ErrorAction Stop)
+    Write-Verbose "Log compressor loaded $($lines.Count) lines."
+    $rootIndex = -1
+    for ($i = 0; $i -lt $lines.Count; $i++) {
+        if ([string]$lines[$i] -match '(?i)\b(error|failed|failure|exception|fatal|panic|assert|expected|received)\b') { $rootIndex = $i; break }
+    }
+    if ($rootIndex -lt 0 -and $lines.Count -gt 0) { $rootIndex = 0 }
+    $start = $rootIndex - 3
+    if ($start -lt 0) { $start = 0 }
+    $end = $rootIndex + 10
+    if ($end -ge $lines.Count) { $end = $lines.Count - 1 }
+    $rootBlock = @()
+    if ($rootIndex -ge 0) {
+        for ($blockIndex = $start; $blockIndex -le $end; $blockIndex++) { $rootBlock += [string]$lines[$blockIndex] }
+    }
+    $stackFrames = @($lines | Where-Object { [string]$_ -match '(?i)\bat\s+.*[:\(]\d+|\.\w+:\d+(?::\d+)?' } | Select-Object -First 8 | ForEach-Object { [string]$_ })
+    $frequent = @($lines | ForEach-Object { ([string]$_).Trim() } | Where-Object { $_ } | Group-Object |
+        Where-Object { $_.Count -gt 1 } | Sort-Object Count -Descending | Select-Object -First 8)
+    Write-Verbose "Log compressor grouped repeated lines."
+    $suppressed = 0
+    foreach ($group in $frequent) { $suppressed += ($group.Count - 1) }
+    Write-Verbose "Log compressor counted $suppressed suppressed lines."
+    $timer.Stop()
+    Write-Verbose 'Log compressor stopped timer.'
+
+    $sourceName = Split-Path -Leaf $Path
+    $rootLineNumber = 0
+    if ($rootIndex -ge 0) { $rootLineNumber = $rootIndex + 1 }
+    $payload = [ordered]@{
+        schemaVersion = 1
+        generated = (Get-Date -Format o)
+        source = $sourceName
+        sourceLines = $lines.Count
+        rootLine = $rootLineNumber
+        rootBlock = @($rootBlock)
+        stackFrames = @($stackFrames)
+        repeatedLinesSuppressed = $suppressed
+    }
+    Write-Verbose 'Log compressor built payload.'
+    $jsonPath = Join-Path $Root '.ai\context\compressed-log.generated.json'
+    $jsonText = $payload | ConvertTo-Json -Depth 8
+    Write-Verbose 'Log compressor converted JSON.'
+    Write-AdosUtf8 $jsonPath $jsonText
+    Write-Verbose 'Log compressor wrote JSON.'
+    $report = @('# ADOS compressed log','',"Source lines: $($lines.Count)","Root line: $($payload.rootLine)","Repeated lines suppressed: $suppressed",'', '## Root failure','```text')
+    $report += @($rootBlock)
+    $report += @('```','','## First stack frames','```text')
+    if ($stackFrames.Count -gt 0) { $report += @($stackFrames) } else { $report += 'none' }
+    $report += '```'
+    Write-AdosUtf8 (Join-Path $Root '.ai\context\compressed-log.generated.md') ($report -join "`r`n")
+    Write-Verbose 'Log compressor wrote Markdown.'
+    Add-AdosUsageEvent $Root 'log-compressor' 'PASS' $timer.ElapsedMilliseconds (Get-Item -LiteralPath $Path).Length 0 @{ lines=$lines.Count; suppressed=$suppressed }
+    Write-Verbose 'Log compressor recorded usage.'
+    Write-Host "Compressed log written to $jsonPath ($($lines.Count) source lines)"
+    return $payload
+}
+
+function Get-AdosEvidenceFiles {
+    param([string]$Root)
+
+    $files = @(Get-AdosChangedFiles $Root)
+    $checkpoint = Read-AdosJson (Join-Path $Root '.ai\checkpoints\current.json') $null
+    if ($checkpoint -and $checkpoint.head -and [string]$checkpoint.head -ne (Get-AdosHead $Root)) {
+        Push-Location $Root
+        try {
+            $committed = @(& git -c core.safecrlf=false diff --name-only ([string]$checkpoint.head + '..HEAD') 2>$null)
+            $files += @($committed | ForEach-Object { ([string]$_).Replace('/', '\') })
+        }
+        finally { Pop-Location }
+    }
+    return @($files | Where-Object { $_ -and ([string]$_ -notmatch '(?i)^\.ai[\\/]') } | Sort-Object -Unique)
+}
+
+function Invoke-AdosScopeGuard {
+    param([string]$Root, [string]$TaskText, [string[]]$Allowed)
+
+    $files = @(Get-AdosEvidenceFiles $Root)
+    $checkpoint = Read-AdosJson (Join-Path $Root '.ai\checkpoints\current.json') $null
+    $baseline = @()
+    if ($checkpoint -and $checkpoint.baselineChangedFiles) { $baseline = @($checkpoint.baselineChangedFiles) }
+    $newFiles = @($files | Where-Object { $baseline -notcontains $_ })
+    $patterns = @($Allowed | Where-Object { $_ })
+    if ($patterns.Count -eq 0) { $patterns = @(Get-AdosTaskTerms $TaskText) }
+    $protectedPattern = '(?i)(^|[\\/])(supabase[\\/](migrations|functions)|migrations?|auth|payments?|billing|broker|trading|production|deploy|release)([\\/]|$)|\.env($|\.)'
+    $outside = @()
+    $protected = @()
+    foreach ($file in $newFiles) {
+        if ($file -match $protectedPattern) { $protected += $file }
+        $matched = $false
+        foreach ($pattern in $patterns) {
+            if ($file -match [regex]::Escape([string]$pattern)) { $matched = $true; break }
+        }
+        if (-not $matched) { $outside += $file }
+    }
+    $status = 'PASS'
+    if ($outside.Count -gt 0 -or $protected.Count -gt 0) { $status = 'REVIEW_REQUIRED' }
+    if ($patterns.Count -eq 0 -and $newFiles.Count -gt 0) { $status = 'REVIEW_REQUIRED' }
+    $payload = [ordered]@{
+        schemaVersion = 1
+        generated = (Get-Date -Format o)
+        task = $TaskText
+        status = $status
+        allowedPatterns = @($patterns)
+        baselineChangedFiles = @($baseline)
+        evaluatedFiles = @($newFiles)
+        outsideScope = @($outside)
+        protectedFiles = @($protected)
+    }
+    $jsonPath = Join-Path $Root '.ai\evidence\scope-guard.generated.json'
+    Write-AdosJson $jsonPath $payload 8
+    $lines = @('# ADOS scope guard','',"Status: $status",'', '## Allowed patterns')
+    $lines += ConvertTo-AdosMarkdownList $patterns
+    $lines += @('','## Outside scope')
+    $lines += ConvertTo-AdosMarkdownList $outside
+    $lines += @('','## Protected files')
+    $lines += ConvertTo-AdosMarkdownList $protected
+    Write-AdosUtf8 (Join-Path $Root '.ai\evidence\scope-guard.generated.md') ($lines -join "`r`n")
+    Write-Host "Scope guard: $status ($($outside.Count) outside, $($protected.Count) protected)"
+    return $payload
+}
+
+function New-AdosCheckResult {
+    param([int]$Level, [string]$Name, [string]$Status, [int]$ExitCode, [string]$Summary)
+    $bounded = [string]$Summary
+    $maxSummaryChars = 6000
+    if ($bounded.Length -gt $maxSummaryChars) {
+        $omitted = $bounded.Length - $maxSummaryChars
+        $bounded = $bounded.Substring(0, $maxSummaryChars) + "`r`n... $omitted characters omitted"
+    }
+    return [pscustomobject]@{ level=$Level; name=$Name; status=$Status; exitCode=$ExitCode; summary=$bounded }
+}
+
+function Invoke-AdosCapturedCommand {
+    param([string]$Root, [string]$Executable, [string[]]$Arguments)
+
+    Push-Location $Root
+    try {
+        $output = & $Executable @Arguments 2>&1 | Out-String
+        $exit = $LASTEXITCODE
+        if ($null -eq $exit) { $exit = 0 }
+        return [pscustomobject]@{ exitCode=[int]$exit; output=$output.TrimEnd() }
+    }
+    finally { Pop-Location }
+}
+
+function Invoke-AdosVerification {
+    param([string]$Root, [int]$Limit)
+
+    $timer = [Diagnostics.Stopwatch]::StartNew()
+    $results = @()
+    $diffCheck = Invoke-AdosCapturedCommand $Root 'git' @('-c','core.safecrlf=false','diff','--check')
+    $results += New-AdosCheckResult 1 'git diff --check' $(if ($diffCheck.exitCode -eq 0) {'PASS'} else {'FAIL'}) $diffCheck.exitCode $(if ($diffCheck.output) {$diffCheck.output} else {'clean'})
+    $stagedDiffCheck = Invoke-AdosCapturedCommand $Root 'git' @('-c','core.safecrlf=false','diff','--cached','--check')
+    $results += New-AdosCheckResult 1 'git diff --cached --check' $(if ($stagedDiffCheck.exitCode -eq 0) {'PASS'} else {'FAIL'}) $stagedDiffCheck.exitCode $(if ($stagedDiffCheck.output) {$stagedDiffCheck.output} else {'clean'})
+    $checkpoint = Read-AdosJson (Join-Path $Root '.ai\checkpoints\current.json') $null
+    if ($checkpoint -and $checkpoint.head -and [string]$checkpoint.head -ne (Get-AdosHead $Root)) {
+        $checkpointRange = ([string]$checkpoint.head + '..HEAD')
+        $committedDiffCheck = Invoke-AdosCapturedCommand $Root 'git' @('-c','core.safecrlf=false','diff','--check',$checkpointRange)
+        $results += New-AdosCheckResult 1 'git checkpoint diff --check' $(if ($committedDiffCheck.exitCode -eq 0) {'PASS'} else {'FAIL'}) $committedDiffCheck.exitCode $(if ($committedDiffCheck.output) {$committedDiffCheck.output} else {'clean'})
+    }
+    $conflicts = Invoke-AdosCapturedCommand $Root 'git' @('grep','-n','-I','-e','^<<<<<<< ','-e','^=======$','-e','^>>>>>>> ')
+    $conflictStatus = if ($conflicts.exitCode -eq 1 -and -not $conflicts.output) { 'PASS' } elseif ($conflicts.output) { 'FAIL' } else { 'PASS' }
+    $results += New-AdosCheckResult 1 'conflict markers' $conflictStatus $conflicts.exitCode $(if ($conflicts.output) {$conflicts.output} else {'none'})
+
+    if ($Limit -ge 2) {
+        $psFiles = @(Get-AdosEvidenceFiles $Root | Where-Object { $_ -match '(?i)\.ps(m)?1$' })
+        foreach ($file in $psFiles) {
+            $full = Join-Path $Root $file
+            try {
+                $tokens = $null
+                $parseErrors = $null
+                [System.Management.Automation.Language.Parser]::ParseFile($full, [ref]$tokens, [ref]$parseErrors) | Out-Null
+                if (@($parseErrors).Count -eq 0) { $results += New-AdosCheckResult 2 "PowerShell parse: $file" 'PASS' 0 'no parser errors' }
+                else { $results += New-AdosCheckResult 2 "PowerShell parse: $file" 'FAIL' 1 ((@($parseErrors | ForEach-Object { $_.Message }) -join '; ')) }
+            }
+            catch { $results += New-AdosCheckResult 2 "PowerShell parse: $file" 'SKIP' 0 'parser unavailable in the current language mode' }
+        }
+        $packagePath = Join-Path $Root 'package.json'
+        if (Test-Path -LiteralPath $packagePath) {
+            try {
+                $package = Get-Content -LiteralPath $packagePath -Raw | ConvertFrom-Json
+                if ($package.scripts -and $package.scripts.typecheck) {
+                    $check = Invoke-AdosCapturedCommand $Root 'npm' @('run','typecheck')
+                    $results += New-AdosCheckResult 2 'npm run typecheck' $(if ($check.exitCode -eq 0) {'PASS'} else {'FAIL'}) $check.exitCode $check.output
+                }
+            }
+            catch { $results += New-AdosCheckResult 2 'package inspection' 'FAIL' 1 $_.Exception.Message }
+        }
+    }
+
+    if ($Limit -ge 3) {
+        $packagePath = Join-Path $Root 'package.json'
+        if (Test-Path -LiteralPath $packagePath) {
+            try {
+                $package = Get-Content -LiteralPath $packagePath -Raw | ConvertFrom-Json
+                if ($package.scripts -and $package.scripts.test) {
+                    $check = Invoke-AdosCapturedCommand $Root 'npm' @('test')
+                    $results += New-AdosCheckResult 3 'npm test' $(if ($check.exitCode -eq 0) {'PASS'} else {'FAIL'}) $check.exitCode $check.output
+                }
+            }
+            catch { }
+        }
+    }
+    if ($Limit -ge 4) {
+        $packagePath = Join-Path $Root 'package.json'
+        if (Test-Path -LiteralPath $packagePath) {
+            try {
+                $package = Get-Content -LiteralPath $packagePath -Raw | ConvertFrom-Json
+                if ($package.scripts -and $package.scripts.'test:integration') {
+                    $check = Invoke-AdosCapturedCommand $Root 'npm' @('run','test:integration')
+                    $results += New-AdosCheckResult 4 'npm run test:integration' $(if ($check.exitCode -eq 0) {'PASS'} else {'FAIL'}) $check.exitCode $check.output
+                }
+                elseif ($package.scripts -and $package.scripts.'test:ci') {
+                    $check = Invoke-AdosCapturedCommand $Root 'npm' @('run','test:ci')
+                    $results += New-AdosCheckResult 4 'npm run test:ci' $(if ($check.exitCode -eq 0) {'PASS'} else {'FAIL'}) $check.exitCode $check.output
+                }
+            }
+            catch { }
+        }
+    }
+    if ($Limit -ge 5) {
+        $packagePath = Join-Path $Root 'package.json'
+        if (Test-Path -LiteralPath $packagePath) {
+            try {
+                $package = Get-Content -LiteralPath $packagePath -Raw | ConvertFrom-Json
+                if ($package.scripts -and $package.scripts.build) {
+                    $check = Invoke-AdosCapturedCommand $Root 'npm' @('run','build')
+                    $results += New-AdosCheckResult 5 'npm run build' $(if ($check.exitCode -eq 0) {'PASS'} else {'FAIL'}) $check.exitCode $check.output
+                }
+            }
+            catch { }
+        }
+    }
+
+    $timer.Stop()
+    $failures = @($results | Where-Object { $_.status -eq 'FAIL' })
+    $status = if ($failures.Count -eq 0) { 'PASS' } else { 'FAIL' }
+    $payload = [ordered]@{
+        schemaVersion = 1
+        generated = (Get-Date -Format o)
+        status = $status
+        maxLevel = $Limit
+        durationMs = $timer.ElapsedMilliseconds
+        checks = @($results)
+    }
+    $jsonPath = Join-Path $Root '.ai\evidence\verification.generated.json'
+    Write-AdosJson $jsonPath $payload 8
+    $lines = @('# ADOS verification ladder','',"Status: $status","Maximum level: $Limit","Duration ms: $($timer.ElapsedMilliseconds)",'','| Level | Check | Status |','|---:|---|---|')
+    foreach ($result in $results) { $lines += "| $($result.level) | $($result.name.Replace('|','/')) | $($result.status) |" }
+    if ($results.Count -eq 0) { $lines += '| 1 | no checks detected | SKIP |' }
+    Write-AdosUtf8 (Join-Path $Root '.ai\evidence\verification.generated.md') ($lines -join "`r`n")
+    Add-AdosUsageEvent $Root 'verification-ladder' $status $timer.ElapsedMilliseconds 0 0 @{ maxLevel=$Limit; checks=$results.Count; failures=$failures.Count }
+    Write-Host "Verification ladder: $status ($($results.Count) checks through level $Limit)"
+    return $payload
+}
+
+function Test-AdosSecretDiff {
+    param([string]$Root)
+
+    Push-Location $Root
+    try {
+        $secretPattern = '(?i)(-----BEGIN (RSA |EC |OPENSSH )?PRIVATE KEY-----|\bAKIA[0-9A-Z]{16}\b|(?:secret|token|password|api[_-]?key)\s*[:=]\s*["''][^"'']{8,})'
+        $checkpoint = Read-AdosJson (Join-Path $Root '.ai\checkpoints\current.json') $null
+        $diffText = @()
+        if ($checkpoint -and $checkpoint.head -and [string]$checkpoint.head -ne (Get-AdosHead $Root)) {
+            $diffText += (& git -c core.safecrlf=false diff --no-ext-diff --unified=0 ([string]$checkpoint.head + '..HEAD') 2>$null | Out-String)
+        }
+        $diffText += (& git -c core.safecrlf=false diff --no-ext-diff --unified=0 2>$null | Out-String)
+        $diffText += (& git -c core.safecrlf=false diff --cached --no-ext-diff --unified=0 2>$null | Out-String)
+        $diff = ($diffText -join "`n")
+        $added = @($diff -split "`r?`n" | Where-Object { $_ -match '^\+[^+]' }) -join "`n"
+        if ($added -match $secretPattern) { return $true }
+        $untracked = @(& git ls-files --others --exclude-standard 2>$null)
+        foreach ($relative in $untracked) {
+            $candidate = Join-Path $Root ([string]$relative)
+            if (-not (Test-Path -LiteralPath $candidate -PathType Leaf)) { continue }
+            $item = Get-Item -LiteralPath $candidate
+            if ($item.Length -gt 2097152) { continue }
+            $content = Get-Content -LiteralPath $candidate -Raw -ErrorAction SilentlyContinue
+            if ($content -match $secretPattern) { return $true }
+        }
+        return $false
+    }
+    finally { Pop-Location }
+}
+
+function Invoke-AdosEvidenceGate {
+    param([string]$Root, [bool]$MustHaveDiff)
+
+    $files = @(Get-AdosEvidenceFiles $Root)
+    $verification = Read-AdosJson (Join-Path $Root '.ai\evidence\verification.generated.json') $null
+    $scope = Read-AdosJson (Join-Path $Root '.ai\evidence\scope-guard.generated.json') $null
+    $hasDiff = $files.Count -gt 0
+    $verificationPassed = [bool]($verification -and [string]$verification.status -eq 'PASS')
+    $scopePassed = [bool]($scope -and [string]$scope.status -eq 'PASS')
+    $secretDetected = Test-AdosSecretDiff $Root
+    $requirements = @(
+        [pscustomobject]@{ name='diff present'; passed=([bool]($hasDiff -or -not $MustHaveDiff)); detail="$($files.Count) files" },
+        [pscustomobject]@{ name='verification observed'; passed=$verificationPassed; detail=$(if ($verification) {[string]$verification.status} else {'missing'}) },
+        [pscustomobject]@{ name='scope guard passed'; passed=$scopePassed; detail=$(if ($scope) {[string]$scope.status} else {'missing'}) },
+        [pscustomobject]@{ name='no secret pattern in added diff'; passed=(-not $secretDetected); detail=$(if ($secretDetected) {'candidate detected'} else {'none'}) }
+    )
+    $failed = @($requirements | Where-Object { -not $_.passed })
+    $status = if ($failed.Count -eq 0) { 'VERIFIED' } else { 'UNVERIFIED' }
+    $payload = [ordered]@{
+        schemaVersion = 1
+        generated = (Get-Date -Format o)
+        status = $status
+        requireDiff = $MustHaveDiff
+        evidenceFiles = @($files)
+        requirements = @($requirements)
+    }
+    $jsonPath = Join-Path $Root '.ai\evidence\evidence-gate.generated.json'
+    Write-AdosJson $jsonPath $payload 8
+    $lines = @('# ADOS evidence gate','',"Status: $status",'', '| Requirement | Result | Detail |','|---|---|---|')
+    foreach ($item in $requirements) { $lines += "| $($item.name) | $(if ($item.passed) {'PASS'} else {'FAIL'}) | $($item.detail) |" }
+    Write-AdosUtf8 (Join-Path $Root '.ai\evidence\evidence-gate.generated.md') ($lines -join "`r`n")
+    Add-AdosUsageEvent $Root 'evidence-gate' $status 0 0 0 @{ requirements=$requirements.Count; failed=$failed.Count }
+    Write-Host "Evidence gate: $status"
+    return $payload
+}
+
+$root = Resolve-AdosRepoRoot $ProjectPath
+Ensure-AdosLocalExclude $root
+switch ($Command) {
+    'fingerprint' { $null = Invoke-AdosFingerprint $root $ErrorText $LogPath $Task }
+    'compress' { $null = Invoke-AdosLogCompressor $root $LogPath }
+    'scope' { $null = Invoke-AdosScopeGuard $root $Task $AllowedScope }
+    'verify' { $null = Invoke-AdosVerification $root $MaxLevel }
+    'evidence' { $null = Invoke-AdosEvidenceGate $root $RequireDiff }
+    'all' {
+        if ($LogPath) {
+            $compressed = Invoke-AdosLogCompressor $root $LogPath
+            $null = Invoke-AdosFingerprint $root (($compressed.rootBlock) -join "`n") '' $Task
+        }
+        $null = Invoke-AdosScopeGuard $root $Task $AllowedScope
+        $null = Invoke-AdosVerification $root $MaxLevel
+        $null = Invoke-AdosEvidenceGate $root $RequireDiff
+    }
+}

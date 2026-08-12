@@ -320,6 +320,7 @@ function Invoke-Adopt {
     Copy-IfMissing (Join-Path $template 'AGENTS.md') (Join-Path $root 'AGENTS.md')
     Copy-IfMissing (Join-Path $template '.ai\context\current-state.md') (Join-Path $root '.ai\context\current-state.md')
     Copy-IfMissing (Join-Path $template '.ai\context\decisions.md') (Join-Path $root '.ai\context\decisions.md')
+    Copy-IfMissing (Join-Path $template '.ai\context\ADR-TEMPLATE.md') (Join-Path $root '.ai\context\ADR-TEMPLATE.md')
     Copy-IfMissing (Join-Path $template '.ai\LOCAL_MODEL_POLICY.md') (Join-Path $root '.ai\LOCAL_MODEL_POLICY.md')
     Copy-IfMissing (Join-Path $template 'scripts\ai-local-task.ps1') (Join-Path $root 'scripts\ai-local-task.ps1')
     Add-IgnoreRules $root

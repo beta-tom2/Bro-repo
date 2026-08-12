@@ -1,50 +1,36 @@
 # Albert DevCore roadmap
 
-## v0.1 — Working foundation
-- [x] environment doctor;
-- [x] safe project adoption;
-- [x] generated repository map;
-- [x] compact session context;
-- [x] rule-based task router;
-- [x] read-only Ollama runner;
-- [x] local diff reviewer;
-- [x] current-state and decision memory templates;
-- [x] PowerShell 5.1 compatibility;
-- [x] zero paid API policy.
+## v0.1 - Working foundation
 
-## v0.2 — Better context selection
-- [ ] changed-file dependency expansion;
-- [ ] TypeScript import graph;
-- [ ] Python import graph;
-- [ ] symbol and test association;
-- [ ] prompt packet builder;
-- [ ] context byte/token budgets;
-- [ ] stale-memory detection.
+- [x] environment doctor and safe project adoption;
+- [x] repository map, session context, routing, and prompt packets;
+- [x] bounded read-only Ollama runner and local diff review;
+- [x] Windows PowerShell 5.1 and zero-paid-API policy.
 
-## v0.3 — Project Brain Lite
-- [ ] domain detection;
-- [ ] architecture entrypoint registry;
-- [ ] incremental decision extraction;
-- [ ] commit-linked issue memory;
-- [ ] prior-fix lookup by error signature;
-- [ ] generated handoff packet.
+## v0.2 - Context and repair memory
 
-## v0.4 — Local quality workers
-- [ ] deterministic TODO and duplicate scan;
-- [ ] unused-file candidates;
-- [ ] long-function report;
-- [ ] local-model review aggregation;
-- [ ] scheduled Windows Task Scheduler analysis;
-- [ ] resumable checkpoints.
+- [x] change-aware import and test maps;
+- [x] repair history and similar-fix search;
+- [x] Heat Map, Knowledge Graph, Fix DNA, Night Audit, and handoff;
+- [x] ADOS as the single preparation entry point.
 
-## v1.0 — Multi-project control plane
-- [ ] project registry;
-- [ ] unified `devcore` command on PATH;
-- [ ] ATLAS adapter;
-- [ ] NAVIRA adapter;
-- [ ] generic web/mobile adapter;
-- [ ] project health dashboard;
-- [ ] automatic safe routing between tools, Ollama and Codex;
-- [ ] installation and self-update workflow.
+## v0.3 - Efficient and evidence-driven ADOS
 
-No roadmap item may require paid third-party AI APIs.
+- [x] Incremental Hash Index and Symbol Index;
+- [x] Elastic Context budgets;
+- [x] Error Fingerprinting, Regression Memory, ADR Memory, and Negative Memory;
+- [x] Log Compressor, Scope Guard, Verification Ladder, and Evidence Gate;
+- [x] ATLAS, NAVIRA, BPMN Studio, and generic project adapters;
+- [x] Checkpoint/Resume, Queue Engine, and read-only Night Mode;
+- [x] local usage analytics and deterministic A/B benchmark;
+- [x] PowerShell 5.1 integration smoke test.
+
+## Next
+
+- [ ] compiler-backed reference resolution when a project already provides a language server;
+- [ ] optional Windows Task Scheduler installation for Night Mode, requiring explicit user authorization;
+- [ ] project-owned health thresholds and trend baselines;
+- [ ] richer test-to-symbol association for monorepos;
+- [ ] PR evidence summary generated from the local Evidence Gate artifacts.
+
+No roadmap item may require a paid third-party AI API. Ollama remains read-only, and protected work continues to require Codex-level review.
