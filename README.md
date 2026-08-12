@@ -45,6 +45,11 @@ ADOS orchestrates DevCore, incremental indexes, project memory, verification evi
 .\ados.ps1 night `
   -ProjectPath "C:\path\to\repo"
 
+.\ados.ps1 scheduler `
+  -ProjectPath "C:\path\to\repo" `
+  -SchedulerAction preview `
+  -DailyAt "03:00"
+
 .\ados.ps1 health `
   -ProjectPath "C:\path\to\repo"
 
@@ -125,11 +130,35 @@ ADOS orchestrates DevCore, incremental indexes, project memory, verification evi
 - Checkpoint and Resume: records task, branch, HEAD, baseline changes, and continuation phase.
 - Queue Engine: maintains a local priority queue; queue inspection never executes a task by itself.
 - Night Mode: refreshes indexes, decisions, audits, queue status, and usage summaries without model calls or product-code changes.
+- Night Mode Scheduler: previews, installs, inspects, or removes one project-scoped Windows task; install and uninstall require explicit confirmation and use the current interactive user with Limited privileges.
 - Project Health and Trends: compares deterministic metrics with optional project-owned `.ados/health.json` thresholds and keeps a bounded local trend history.
 - Usage Analytics: records local stage duration and byte-selection estimates, not claimed billing data.
 - A/B Benchmark: compares fixed lexical selection with elastic symbol-aware selection using deterministic proxy metrics.
 
 Architecture details are in `docs/ADOS_ARCHITECTURE.md`.
+
+### Optional Windows schedule
+
+Start with a non-mutating preview. It writes a local plan under `.ai/analytics/` and does not touch Windows Task Scheduler:
+
+```powershell
+.\ados.ps1 scheduler `
+  -ProjectPath "C:\path\to\repo" `
+  -SchedulerAction preview `
+  -DailyAt "03:00"
+```
+
+After reviewing the preview, installation still requires an explicit confirmation flag. It creates one stable project-scoped task, runs only while the current user is logged on, uses Limited privileges, stores no password, and refuses to replace an existing task by default:
+
+```powershell
+.\ados.ps1 scheduler `
+  -ProjectPath "C:\path\to\repo" `
+  -SchedulerAction install `
+  -DailyAt "03:00" `
+  -ConfirmSchedulerInstall
+```
+
+Use `-SchedulerAction status` to inspect it. Removal is exact-name only and requires `-ConfirmSchedulerUninstall`. Replacing an existing task additionally requires `-ReplaceScheduledTask`. Moving the DevCore directory after installation requires reinstalling the task because the action stores the absolute local path to `ados.ps1`.
 
 ## Generated local files
 

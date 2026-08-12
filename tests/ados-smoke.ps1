@@ -68,6 +68,7 @@ $Quality = Join-Path $RepoRoot 'scripts\ados-quality.ps1'
 $Memory = Join-Path $RepoRoot 'scripts\ados-memory-v3.ps1'
 $Operations = Join-Path $RepoRoot 'scripts\ados-operations.ps1'
 $Ados = Join-Path $RepoRoot 'ados.ps1'
+$Scheduler = Join-Path $RepoRoot 'scripts\ados-scheduler.ps1'
 
 & $Index all -ProjectPath $ResolvedFixture -Task 'Fix sendFriendRequest behavior' -MaxFiles 100
 $first = Read-Json '.ai\index\hash-index.generated.json'
@@ -288,5 +289,22 @@ finally { Pop-Location }
 Assert-True ($statusBeforeNight -eq $statusAfterNight) 'night mode must not change product-code Git status'
 $nightSummary = Get-Content -LiteralPath (Join-Path $ResolvedFixture '.ai\analytics\night-mode.generated.md') -Raw
 Assert-True ($nightSummary -match 'Project health: HEALTHY') 'night mode must include current project health'
+
+& $Ados scheduler -ProjectPath $ResolvedFixture -SchedulerAction preview -DailyAt '03:15' -MaxFiles 100 -HealthHistoryLimit 5
+$schedulerPreview = Read-Json '.ai\analytics\night-scheduler.generated.json'
+Assert-True ($schedulerPreview.state -eq 'PREVIEW') 'scheduler preview must remain non-mutating'
+Assert-True ([string]$schedulerPreview.task.taskName -match '^ADOS-Night-ados-v3-smoke-[a-f0-9]{10}$') 'scheduler task name must be scoped to the exact project'
+Assert-True ($schedulerPreview.task.runLevel -eq 'Limited') 'scheduler must use limited privileges'
+Assert-True ($schedulerPreview.task.logonType -eq 'Interactive') 'scheduler must not store background credentials'
+Assert-True (-not [bool]$schedulerPreview.task.storesCredentials) 'scheduler must not store credentials'
+Assert-True ([string]$schedulerPreview.task.arguments -match 'RemoteSigned') 'scheduler must not bypass the PowerShell execution policy'
+$installBlocked = $false
+try { & $Scheduler install -ProjectPath $ResolvedFixture -DailyAt '03:15' -MaxFiles 100 -HealthHistoryLimit 5 }
+catch { $installBlocked = [string]$_.Exception.Message -match 'Installation blocked' }
+Assert-True $installBlocked 'scheduler installation must require explicit confirmation before system access'
+$uninstallBlocked = $false
+try { & $Scheduler uninstall -ProjectPath $ResolvedFixture -DailyAt '03:15' -MaxFiles 100 -HealthHistoryLimit 5 }
+catch { $uninstallBlocked = [string]$_.Exception.Message -match 'Uninstall blocked' }
+Assert-True $uninstallBlocked 'scheduler uninstall must require explicit confirmation before system access'
 
 Write-Host 'ADOS v0.3 smoke test: PASS'
