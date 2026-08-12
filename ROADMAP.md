@@ -31,7 +31,7 @@
 - [ ] compiler-backed reference resolution when a project already provides a language server;
 - [ ] optional Windows Task Scheduler installation for Night Mode, requiring explicit user authorization;
 - [x] project-owned health thresholds and bounded local trend baselines;
-- [ ] richer test-to-symbol association for monorepos;
+- [x] richer test-to-symbol association for monorepos with bounded focused-test execution;
 - [x] PR evidence summary generated from the local Evidence Gate artifacts, with repository-state freshness validation.
 
 No roadmap item may require a paid third-party AI API. Ollama remains read-only, and protected work continues to require Codex-level review.

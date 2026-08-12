@@ -95,7 +95,7 @@ ADOS orchestrates DevCore, incremental indexes, project memory, verification evi
   -Files @("src\friends.ts")
 ```
 
-`start` saves a pre-change checkpoint, detects the project adapter, refreshes local memory, builds symbol-aware elastic context, and creates the prompt packet and handoff. `verify` runs Scope Guard, the bounded Verification Ladder, and Evidence Gate, then writes a bounded PR evidence summary. `pr-summary` regenerates that summary without rerunning checks and marks it `NOT_READY` if the repository changed after Evidence Gate. A task is reported as `VERIFIED` only when required evidence was actually observed.
+`start` saves a pre-change checkpoint, detects the project adapter, refreshes local memory, builds symbol-aware elastic context, and creates the prompt packet and handoff. `verify` refreshes deterministic indexes, runs Scope Guard, the bounded Verification Ladder, and Evidence Gate, then writes a bounded PR evidence summary. When a current test-to-symbol map finds at most 12 JavaScript or TypeScript tests under a recognized package runner, level 3 runs those package-local tests; otherwise it safely falls back to the existing full-suite behavior. `pr-summary` regenerates that summary without rerunning checks and marks it `NOT_READY` if the repository changed after Evidence Gate. A task is reported as `VERIFIED` only when required evidence was actually observed.
 
 ## ADOS modules
 
@@ -110,6 +110,7 @@ ADOS orchestrates DevCore, incremental indexes, project memory, verification evi
 - Handoff: creates a resumable continuation packet.
 - Incremental Hash Index: hashes source files and reuses imports and symbols when content did not change.
 - Symbol Index: maps functions, classes, types, and other language-level declarations to files and lines.
+- Test-to-Symbol Map: associates tests with source files using relative imports, unique symbols, matching stems, and monorepo package boundaries.
 - Elastic Context: chooses a risk-based budget, prioritizes repository entrypoints, and removes duplicate file content by SHA-256.
 - Error Fingerprinting: normalizes failures into stable local signatures and recurrence counts.
 - Regression Memory: links bugs, related files, and approved deterministic regression commands.
