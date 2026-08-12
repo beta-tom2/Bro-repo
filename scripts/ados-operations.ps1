@@ -12,7 +12,7 @@ param(
     [string]$Phase = 'prepared',
     [ValidateSet('low','normal','high','protected')]
     [string]$Priority = 'normal',
-    [ValidateSet('pending','completed','failed','cancelled')]
+    [ValidateSet('pending','completed','failed','cancelled','blocked')]
     [string]$QueueStatus = 'completed',
     [ValidateSet('auto','small','medium','large','protected')]
     [string]$ContextTier = 'auto',
@@ -212,24 +212,32 @@ function Read-AdosQueue {
 
 function Write-AdosQueue {
     param([string]$Root, [object[]]$Tasks)
-    Write-AdosJson (Get-AdosQueuePath $Root) ([ordered]@{ schemaVersion=1; updated=(Get-Date -Format o); tasks=@($Tasks) }) 10
+    $path = Get-AdosQueuePath $Root
+    $temporary = "$path.$PID.tmp"
+    Write-AdosJson $temporary ([ordered]@{ schemaVersion=2; updated=(Get-Date -Format o); tasks=@($Tasks) }) 12
+    Move-Item -LiteralPath $temporary -Destination $path -Force
 }
 
 function Add-AdosQueueTask {
     param([string]$Root, [string]$TaskText, [string]$TaskPriority)
 
     if (-not $TaskText) { throw 'Task is required for queue-add.' }
-    $queue = Read-AdosQueue $Root
-    $tasks = @($queue.tasks)
-    $created = Get-Date -Format o
-    $id = (Get-AdosTextHash ($TaskText + '|' + $created)).Substring(0, 16)
-    $tasks += [pscustomobject]@{
-        id=$id; created=$created; updated=$created; task=$TaskText; priority=$TaskPriority;
-        status='pending'; attempts=0; note='Queue preparation is local and does not invoke a model or edit product code.'
+    $lockPath = Enter-AdosQueueLock $Root
+    try {
+        $queue = Read-AdosQueue $Root
+        $tasks = @($queue.tasks)
+        $created = Get-Date -Format o
+        $id = (Get-AdosTextHash ($TaskText + '|' + $created)).Substring(0, 16)
+        $added = [pscustomobject]@{
+            id=$id; created=$created; updated=$created; task=$TaskText; priority=$TaskPriority;
+            status='pending'; attempts=0; note='Queue preparation is local and does not invoke a model or edit product code.'
+        }
+        $tasks += $added
+        Write-AdosQueue $Root $tasks
     }
-    Write-AdosQueue $Root $tasks
+    finally { Exit-AdosQueueLock $lockPath }
     Write-Host "Queued task: $id ($TaskPriority)"
-    return $tasks | Where-Object { $_.id -eq $id } | Select-Object -First 1
+    return $added
 }
 
 function Get-AdosNextQueueTask {
@@ -252,21 +260,28 @@ function Complete-AdosQueueTask {
     param([string]$Root, [string]$Id, [string]$NewStatus)
 
     if (-not $Id) { throw 'QueueId is required for queue-complete.' }
-    $queue = Read-AdosQueue $Root
-    $tasks = @()
-    $found = $false
-    foreach ($item in @($queue.tasks)) {
-        if ([string]$item.id -eq $Id) {
-            $found = $true
-            $tasks += [pscustomobject]@{
-                id=$item.id; created=$item.created; updated=(Get-Date -Format o); task=$item.task;
-                priority=$item.priority; status=$NewStatus; attempts=([int]$item.attempts + 1); note=$item.note
+    $lockPath = Enter-AdosQueueLock $Root
+    try {
+        $queue = Read-AdosQueue $Root
+        $tasks = @()
+        $found = $false
+        foreach ($item in @($queue.tasks)) {
+            if ([string]$item.id -eq $Id) {
+                if ([string]$item.status -eq 'claimed') {
+                    throw "Queue task is leased by the autonomous dispatcher; use dispatch complete with the exact lease ID: $Id"
+                }
+                $found = $true
+                $tasks += [pscustomobject]@{
+                    id=$item.id; created=$item.created; updated=(Get-Date -Format o); task=$item.task;
+                    priority=$item.priority; status=$NewStatus; attempts=([int]$item.attempts + 1); note=$item.note
+                }
             }
+            else { $tasks += $item }
         }
-        else { $tasks += $item }
+        if (-not $found) { throw "Queue task not found: $Id" }
+        Write-AdosQueue $Root $tasks
     }
-    if (-not $found) { throw "Queue task not found: $Id" }
-    Write-AdosQueue $Root $tasks
+    finally { Exit-AdosQueueLock $lockPath }
     Write-Host "Queue task $Id -> $NewStatus"
 }
 

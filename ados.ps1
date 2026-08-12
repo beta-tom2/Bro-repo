@@ -1,7 +1,7 @@
 [CmdletBinding()]
 param(
     [Parameter(Position = 0, Mandatory = $true)]
-    [ValidateSet('doctor','start','analyze','night','scheduler','health','handoff','resume','verify','pr-summary','queue','benchmark','stats','failure','remember-regression','remember-negative')]
+    [ValidateSet('doctor','start','analyze','night','scheduler','dispatch','health','handoff','resume','verify','pr-summary','queue','benchmark','stats','failure','remember-regression','remember-negative')]
     [string]$Command,
 
     [string]$ProjectPath = '.',
@@ -19,7 +19,7 @@ param(
     [string]$QueueId = '',
     [ValidateSet('low','normal','high','protected')]
     [string]$Priority = 'normal',
-    [ValidateSet('pending','completed','failed','cancelled')]
+    [ValidateSet('pending','completed','failed','cancelled','blocked')]
     [string]$QueueStatus = 'completed',
     [bool]$RequireDiff = $true,
     [string]$LogPath = '',
@@ -38,6 +38,18 @@ param(
     [switch]$ConfirmSchedulerInstall,
     [switch]$ReplaceScheduledTask,
     [switch]$ConfirmSchedulerUninstall,
+    [ValidateSet('run','status','complete','release')]
+    [string]$DispatchAction = 'run',
+    [string]$DispatchLeaseId = '',
+    [ValidateSet('completed','failed','blocked')]
+    [string]$DispatchResult = 'completed',
+    [string]$DispatchNote = '',
+    [ValidateRange(10,720)]
+    [int]$DispatchLeaseMinutes = 120,
+    [ValidateRange(1,10)]
+    [int]$DispatchMaxAttempts = 3,
+    [bool]$DispatchPrepareContext = $true,
+    [bool]$DispatchUseOllama = $true,
     [ValidateRange(2,365)]
     [int]$HealthHistoryLimit = 90
 )
@@ -54,6 +66,7 @@ $MemoryV3 = Join-Path $Root 'scripts\ados-memory-v3.ps1'
 $Operations = Join-Path $Root 'scripts\ados-operations.ps1'
 $Health = Join-Path $Root 'scripts\ados-health.ps1'
 $Scheduler = Join-Path $Root 'scripts\ados-scheduler.ps1'
+$Dispatcher = Join-Path $Root 'scripts\ados-dispatch.ps1'
 
 function Require-File {
     param([string]$Path)
@@ -131,6 +144,7 @@ function Invoke-Doctor {
     Require-File $Operations
     Require-File $Health
     Require-File $Scheduler
+    Require-File $Dispatcher
     & $DevCore doctor
     Write-Host ''
     Write-Host 'ADOS components:'
@@ -143,6 +157,7 @@ function Invoke-Doctor {
     Write-Host ('{0,-28} PASS' -f 'v3 memory and operations')
     Write-Host ('{0,-28} PASS' -f 'project health and trends')
     Write-Host ('{0,-28} PASS' -f 'safe Night Mode scheduler')
+    Write-Host ('{0,-28} PASS' -f 'autonomous dispatcher')
 }
 
 function Get-ElasticBudget {
@@ -235,6 +250,10 @@ switch ($Command) {
     'scheduler' {
         Ensure-LocalExclude $repo
         & $Scheduler $SchedulerAction -ProjectPath $repo -DailyAt $DailyAt -MaxFiles $MaxFiles -HealthHistoryLimit $HealthHistoryLimit -TaskName $SchedulerTaskName -ConfirmInstall:$ConfirmSchedulerInstall -ReplaceExisting:$ReplaceScheduledTask -ConfirmUninstall:$ConfirmSchedulerUninstall
+    }
+    'dispatch' {
+        Ensure-LocalExclude $repo
+        & $Dispatcher $DispatchAction -ProjectPath $repo -QueueId $QueueId -LeaseId $DispatchLeaseId -ResultStatus $DispatchResult -ResultNote $DispatchNote -LeaseMinutes $DispatchLeaseMinutes -MaxAttempts $DispatchMaxAttempts -MaxFiles $MaxFiles -PrepareContext:$DispatchPrepareContext -UseOllama:$DispatchUseOllama
     }
     'health' {
         Ensure-LocalExclude $repo

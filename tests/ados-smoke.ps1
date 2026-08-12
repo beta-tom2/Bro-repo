@@ -3,7 +3,7 @@ param()
 
 $ErrorActionPreference = 'Stop'
 $RepoRoot = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..'))
-$Fixture = Join-Path $RepoRoot 'tests\.work\ados-v3-smoke'
+$Fixture = Join-Path $RepoRoot 'tests\.work\ados-v4-smoke'
 $FixtureParent = [IO.Path]::GetFullPath((Join-Path $RepoRoot 'tests\.work'))
 $ResolvedFixture = [IO.Path]::GetFullPath($Fixture)
 if (-not $ResolvedFixture.StartsWith($FixtureParent, [StringComparison]::OrdinalIgnoreCase)) {
@@ -69,6 +69,7 @@ $Memory = Join-Path $RepoRoot 'scripts\ados-memory-v3.ps1'
 $Operations = Join-Path $RepoRoot 'scripts\ados-operations.ps1'
 $Ados = Join-Path $RepoRoot 'ados.ps1'
 $Scheduler = Join-Path $RepoRoot 'scripts\ados-scheduler.ps1'
+$Dispatcher = Join-Path $RepoRoot 'scripts\ados-dispatch.ps1'
 
 & $Index all -ProjectPath $ResolvedFixture -Task 'Fix sendFriendRequest behavior' -MaxFiles 100
 $first = Read-Json '.ai\index\hash-index.generated.json'
@@ -239,6 +240,50 @@ Assert-True ((Read-Json '.ai\memory\error-fingerprints.json').entries.Count -ge 
 & $Operations queue-add -ProjectPath $ResolvedFixture -Task 'Review friend regression evidence' -Priority high
 & $Operations queue-next -ProjectPath $ResolvedFixture
 Assert-True ((Read-Json '.ai\queue\next.generated.json').next.status -eq 'pending') 'queue engine must return the pending task'
+& $Dispatcher run -ProjectPath $ResolvedFixture -MaxFiles 100 -PrepareContext:$false -UseOllama:$false
+$dispatch = Read-Json '.ai\queue\dispatch.generated.json'
+$dispatchQueue = Read-Json '.ai\queue\tasks.json'
+Assert-True ($dispatch.state -eq 'READY_FOR_CODEX') 'dispatcher must lease one task for Codex'
+Assert-True ($dispatch.route -eq 'CODEX_PRIMARY_WITH_DETERMINISTIC_TOOLS') 'dispatcher must use the central route policy'
+Assert-True (@($dispatchQueue.tasks | Where-Object { $_.id -eq $dispatch.queueId -and $_.status -eq 'claimed' }).Count -eq 1) 'dispatcher must persist the claimed state'
+& $Dispatcher run -ProjectPath $ResolvedFixture -MaxFiles 100 -PrepareContext:$false -UseOllama:$false
+Assert-True ((Read-Json '.ai\queue\dispatch.generated.json').state -eq 'BUSY') 'dispatcher must not duplicate an active lease'
+$legacyCompletionRejected = $false
+try { & $Operations queue-complete -ProjectPath $ResolvedFixture -QueueId $dispatch.queueId -QueueStatus completed }
+catch { $legacyCompletionRejected = [string]$_.Exception.Message -match 'exact lease ID' }
+Assert-True $legacyCompletionRejected 'legacy queue completion must not bypass an active dispatcher lease'
+$expiredQueue = Read-Json '.ai\queue\tasks.json'
+foreach ($item in @($expiredQueue.tasks)) {
+    if ([string]$item.id -eq $dispatch.queueId) { $item.leaseUntil = (Get-Date).AddMinutes(-1).ToString('o') }
+}
+Write-FixtureFile '.ai\queue\tasks.json' ($expiredQueue | ConvertTo-Json -Depth 12)
+& $Dispatcher run -ProjectPath $ResolvedFixture -MaxFiles 100 -PrepareContext:$false -UseOllama:$false
+$recoveredDispatch = Read-Json '.ai\queue\dispatch.generated.json'
+Assert-True ($recoveredDispatch.state -eq 'READY_FOR_CODEX') 'dispatcher must recover an expired lease'
+Assert-True ($recoveredDispatch.leaseId -ne $dispatch.leaseId) 'stale-lease recovery must issue a new lease ID'
+$dispatch = $recoveredDispatch
+$leaseRejected = $false
+try { & $Dispatcher complete -ProjectPath $ResolvedFixture -QueueId $dispatch.queueId -LeaseId 'wrong-lease' }
+catch { $leaseRejected = [string]$_.Exception.Message -match 'Lease mismatch' }
+Assert-True $leaseRejected 'dispatcher must reject completion with the wrong lease'
+& $Dispatcher release -ProjectPath $ResolvedFixture -QueueId $dispatch.queueId -LeaseId $dispatch.leaseId -ResultNote 'smoke release'
+Assert-True (@((Read-Json '.ai\queue\tasks.json').tasks | Where-Object { $_.id -eq $dispatch.queueId -and $_.status -eq 'pending' }).Count -eq 1) 'release must return the exact task to pending'
+& $Dispatcher run -ProjectPath $ResolvedFixture -MaxFiles 100 -PrepareContext:$false -UseOllama:$false
+$dispatchAgain = Read-Json '.ai\queue\dispatch.generated.json'
+& $Dispatcher complete -ProjectPath $ResolvedFixture -QueueId $dispatchAgain.queueId -LeaseId $dispatchAgain.leaseId -ResultStatus completed -ResultNote 'smoke completed'
+Assert-True (@((Read-Json '.ai\queue\tasks.json').tasks | Where-Object { $_.id -eq $dispatchAgain.queueId -and $_.status -eq 'completed' }).Count -eq 1) 'completion must close only the exact leased task'
+& $Operations queue-add -ProjectPath $ResolvedFixture -Task 'Review README wording' -Priority low
+& $Dispatcher run -ProjectPath $ResolvedFixture -MaxFiles 100 -PrepareContext:$false -UseOllama:$false
+$localDispatch = Read-Json '.ai\queue\dispatch.generated.json'
+Assert-True ($localDispatch.route -eq 'LOCAL_FIRST_THEN_CODEX_VERIFY') 'safe documentation work must route local-first'
+Assert-True ($localDispatch.details.localModel -eq 'DISABLED') 'test mode must disable Ollama without weakening the route'
+& $Dispatcher complete -ProjectPath $ResolvedFixture -QueueId $localDispatch.queueId -LeaseId $localDispatch.leaseId -ResultStatus completed -ResultNote 'local route tested'
+& $Operations queue-add -ProjectPath $ResolvedFixture -Task 'Review README wording for Supabase RLS release' -Priority protected
+& $Dispatcher run -ProjectPath $ResolvedFixture -MaxFiles 100 -PrepareContext:$false -UseOllama:$true
+$protectedDispatch = Read-Json '.ai\queue\dispatch.generated.json'
+Assert-True ($protectedDispatch.route -eq 'CODEX_REQUIRED') 'protected work must always route to Codex'
+Assert-True ($protectedDispatch.details.localModel -eq 'SKIP') 'protected work must never invoke Ollama'
+& $Dispatcher complete -ProjectPath $ResolvedFixture -QueueId $protectedDispatch.queueId -LeaseId $protectedDispatch.leaseId -ResultStatus blocked -ResultNote 'protected authorization required'
 & $Operations benchmark -ProjectPath $ResolvedFixture -Task 'Fix sendFriendRequest behavior' -MaxFiles 100
 $benchmark = Read-Json '.ai\analytics\ab-benchmark.generated.json'
 Assert-True ($benchmark.incremental.secondUpdated -eq 0) 'benchmark second index pass must be incremental'
@@ -293,7 +338,7 @@ Assert-True ($nightSummary -match 'Project health: HEALTHY') 'night mode must in
 & $Ados scheduler -ProjectPath $ResolvedFixture -SchedulerAction preview -DailyAt '03:15' -MaxFiles 100 -HealthHistoryLimit 5
 $schedulerPreview = Read-Json '.ai\analytics\night-scheduler.generated.json'
 Assert-True ($schedulerPreview.state -eq 'PREVIEW') 'scheduler preview must remain non-mutating'
-Assert-True ([string]$schedulerPreview.task.taskName -match '^ADOS-Night-ados-v3-smoke-[a-f0-9]{10}$') 'scheduler task name must be scoped to the exact project'
+Assert-True ([string]$schedulerPreview.task.taskName -match '^ADOS-Night-ados-v4-smoke-[a-f0-9]{10}$') 'scheduler task name must be scoped to the exact project'
 Assert-True ($schedulerPreview.task.runLevel -eq 'Limited') 'scheduler must use limited privileges'
 Assert-True ($schedulerPreview.task.logonType -eq 'Interactive') 'scheduler must not store background credentials'
 Assert-True (-not [bool]$schedulerPreview.task.storesCredentials) 'scheduler must not store credentials'
@@ -307,4 +352,4 @@ try { & $Scheduler uninstall -ProjectPath $ResolvedFixture -DailyAt '03:15' -Max
 catch { $uninstallBlocked = [string]$_.Exception.Message -match 'Uninstall blocked' }
 Assert-True $uninstallBlocked 'scheduler uninstall must require explicit confirmation before system access'
 
-Write-Host 'ADOS v0.3 smoke test: PASS'
+Write-Host 'ADOS v0.4 smoke test: PASS'

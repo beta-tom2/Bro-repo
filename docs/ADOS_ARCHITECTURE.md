@@ -32,6 +32,7 @@ User task
   -> Evidence Gate
   -> PR Evidence Summary
   -> Project Health and Trend Baseline
+  -> Autonomous Queue Dispatcher and Lease
   -> Checkpoint / Handoff
 ```
 
@@ -85,7 +86,7 @@ Scope Guard compares changes against the pre-task checkpoint and allowed paths. 
 Error Fingerprinting removes unstable paths, line numbers, hashes, and large numbers before creating a local signature. Regression Memory associates tasks and fingerprints with approved deterministic commands. ADR Memory indexes repository decision documents, while Negative Memory records failed approaches that should not be repeated without changed evidence.
 
 ### Operations
-Project adapters identify protected boundaries for ATLAS, NAVIRA, BPMN Studio, and generic projects. Checkpoint/Resume prevents silent branch drift. Queue Engine stores work locally but does not execute it implicitly. Night Mode performs read-only indexing and reporting without model calls. Its optional Windows Task Scheduler integration is preview-first, project-scoped, current-user only, Limited privilege, passwordless, exact-name managed, and confirmation-gated for both installation and removal. Project Health reads optional project-owned thresholds, compares them with current deterministic metrics, and stores a bounded local history with previous and rolling-baseline deltas. Invalid configuration produces `CONFIG_ERROR`; missing optional metrics are skipped instead of invented. Usage analytics and A/B benchmarks report deterministic byte and timing proxies, never claimed token billing.
+Project adapters identify protected boundaries for ATLAS, NAVIRA, BPMN Studio, and generic projects. Checkpoint/Resume prevents silent branch drift. Queue Engine stores work locally. The v0.4 dispatcher leases one eligible item at a time, recovers stale leases, applies the central route policy, prepares deterministic context, and optionally invokes bounded read-only Ollama only for the local-safe route. A scheduled Codex agent remains responsible for edits, evidence, Draft PR creation, and explicit completion of the exact lease. Night Mode performs read-only indexing and reporting without model calls. Its optional Windows Task Scheduler integration is preview-first, project-scoped, current-user only, Limited privilege, passwordless, exact-name managed, and confirmation-gated for both installation and removal. Project Health reads optional project-owned thresholds, compares them with current deterministic metrics, and stores a bounded local history with previous and rolling-baseline deltas. Invalid configuration produces `CONFIG_ERROR`; missing optional metrics are skipped instead of invented. Usage analytics and A/B benchmarks report deterministic byte and timing proxies, never claimed token billing.
 
 ## Storage
 
