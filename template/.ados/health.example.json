@@ -1,0 +1,15 @@
+{
+  "schemaVersion": 1,
+  "historyLimit": 90,
+  "baselineWindow": 10,
+  "thresholds": {
+    "maxConflictMarkers": 0,
+    "maxLargeSourceFiles": 20,
+    "maxTodoMarkers": 200,
+    "maxChangedFiles": 50,
+    "maxIndexUpdatedFiles": 100,
+    "minIndexReusePercent": 50,
+    "maxFailedVerificationChecks": 0,
+    "minContextReductionPercent": 20
+  }
+}

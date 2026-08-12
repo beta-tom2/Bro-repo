@@ -30,7 +30,7 @@
 
 - [ ] compiler-backed reference resolution when a project already provides a language server;
 - [ ] optional Windows Task Scheduler installation for Night Mode, requiring explicit user authorization;
-- [ ] project-owned health thresholds and trend baselines;
+- [x] project-owned health thresholds and bounded local trend baselines;
 - [ ] richer test-to-symbol association for monorepos;
 - [x] PR evidence summary generated from the local Evidence Gate artifacts, with repository-state freshness validation.
 

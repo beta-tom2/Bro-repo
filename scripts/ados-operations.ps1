@@ -1,7 +1,7 @@
 [CmdletBinding()]
 param(
     [Parameter(Position = 0, Mandatory = $true)]
-    [ValidateSet('adapter','checkpoint','resume','queue-add','queue-next','queue-complete','night','usage','benchmark')]
+    [ValidateSet('adapter','checkpoint','resume','queue-add','queue-next','queue-complete','night','health','usage','benchmark')]
     [string]$Command,
 
     [Parameter(Mandatory = $true)]
@@ -16,7 +16,9 @@ param(
     [string]$QueueStatus = 'completed',
     [ValidateSet('auto','small','medium','large','protected')]
     [string]$ContextTier = 'auto',
-    [int]$MaxFiles = 2000
+    [int]$MaxFiles = 2000,
+    [ValidateRange(2,365)]
+    [int]$HealthHistoryLimit = 90
 )
 
 $ErrorActionPreference = 'Stop'
@@ -25,6 +27,7 @@ $Common = Join-Path $ScriptsRoot 'ados-common.ps1'
 $Index = Join-Path $ScriptsRoot 'ados-index.ps1'
 $MemoryV3 = Join-Path $ScriptsRoot 'ados-memory-v3.ps1'
 $NightAudit = Join-Path $ScriptsRoot 'ados-night-audit.ps1'
+$Health = Join-Path $ScriptsRoot 'ados-health.ps1'
 . $Common
 
 function Get-AdosProjectAdapter {
@@ -352,7 +355,7 @@ function Invoke-AdosBenchmark {
     $elasticDensity = if ($elasticSourceBytes -gt 0) { [math]::Round(($elasticHits * 10000.0) / $elasticSourceBytes, 3) } else { 0 }
     $reduction = if ($baselineBytes -gt 0) { [math]::Round((1 - ($elasticSourceBytes / [double]$baselineBytes)) * 100, 2) } else { 0 }
     $payload = [ordered]@{
-        schemaVersion=1; generated=(Get-Date -Format o); task=$TaskText;
+        schemaVersion=2; generated=(Get-Date -Format o); task=$TaskText; branch=(Get-AdosBranch $Root); head=(Get-AdosHead $Root);
         A=[ordered]@{ name='fixed lexical context'; budgetBytes=$baselineBudget; selectedBytes=$baselineBytes; files=$baselineFiles.Count; relevantTermHits=$baselineHits; relevanceDensity=$baselineDensity };
         B=[ordered]@{ name='elastic symbol-aware context'; tier=$elastic.tier; budgetBytes=$elastic.budgetBytes; selectedBytes=$elasticSourceBytes; files=$elasticSourceFiles; relevantTermHits=$elasticHits; relevanceDensity=$elasticDensity };
         contextByteReductionPercent=$reduction;
@@ -379,26 +382,39 @@ function Invoke-AdosBenchmark {
 }
 
 function Invoke-AdosNightMode {
-    param([string]$Root, [int]$Limit)
+    param([string]$Root, [int]$Limit, [int]$HistoryLimit)
 
     $timer = [Diagnostics.Stopwatch]::StartNew()
     $null = Get-AdosProjectAdapter $Root
     & $Index all -ProjectPath $Root -MaxFiles $Limit
     & $MemoryV3 decisions -ProjectPath $Root -Task ''
     & $NightAudit -ProjectPath $Root
+    & $Health -ProjectPath $Root -MaxHistory $HistoryLimit
+    $healthResult = Read-AdosJson (Join-Path $Root '.ai\analytics\health.generated.json') $null
+    $healthStatus = if ($healthResult) { [string]$healthResult.status } else { 'MISSING' }
     $queue = Read-AdosQueue $Root
     $pending = @($queue.tasks | Where-Object { $_.status -eq 'pending' })
     $timer.Stop()
-    Add-AdosUsageEvent $Root 'night-mode' 'PASS' $timer.ElapsedMilliseconds 0 0 @{ pendingQueue=$pending.Count; modelCalls=0; productCodeChanges=0 }
+    Add-AdosUsageEvent $Root 'night-mode' 'PASS' $timer.ElapsedMilliseconds 0 0 @{ pendingQueue=$pending.Count; health=$healthStatus; modelCalls=0; productCodeChanges=0 }
     $null = Write-AdosUsageSummary $Root
     $lines = @(
         '# ADOS night mode summary','',"Generated: $(Get-Date -Format o)","Duration ms: $($timer.ElapsedMilliseconds)",
-        "Pending queue tasks: $($pending.Count)",'','## Safety',
+        "Pending queue tasks: $($pending.Count)","Project health: $healthStatus",'','## Safety',
         '- No paid API or model was called.','- No product-code file was edited.','- Queue tasks were reported but not executed.',
         '- Findings remain advisory until deterministic checks and Codex review are complete.'
     )
     Write-AdosUtf8 (Join-Path $Root '.ai\analytics\night-mode.generated.md') ($lines -join "`r`n")
     Write-Host "Night mode completed ($($pending.Count) queued tasks, no model calls)"
+}
+
+function Invoke-AdosHealthMode {
+    param([string]$Root, [int]$Limit, [int]$HistoryLimit)
+
+    $null = Get-AdosProjectAdapter $Root
+    & $Index all -ProjectPath $Root -MaxFiles $Limit
+    & $NightAudit -ProjectPath $Root
+    & $Health -ProjectPath $Root -MaxHistory $HistoryLimit
+    $null = Write-AdosUsageSummary $Root
 }
 
 $root = Resolve-AdosRepoRoot $ProjectPath
@@ -410,7 +426,8 @@ switch ($Command) {
     'queue-add' { $null = Add-AdosQueueTask $root $Task $Priority }
     'queue-next' { $null = Get-AdosNextQueueTask $root }
     'queue-complete' { Complete-AdosQueueTask $root $QueueId $QueueStatus }
-    'night' { Invoke-AdosNightMode $root $MaxFiles }
+    'night' { Invoke-AdosNightMode $root $MaxFiles $HealthHistoryLimit }
+    'health' { Invoke-AdosHealthMode $root $MaxFiles $HealthHistoryLimit }
     'usage' { $null = Write-AdosUsageSummary $root }
     'benchmark' { $null = Invoke-AdosBenchmark $root $Task $ContextTier $MaxFiles }
 }

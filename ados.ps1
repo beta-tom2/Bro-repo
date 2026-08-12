@@ -1,7 +1,7 @@
 [CmdletBinding()]
 param(
     [Parameter(Position = 0, Mandatory = $true)]
-    [ValidateSet('doctor','start','analyze','night','handoff','resume','verify','pr-summary','queue','benchmark','stats','failure','remember-regression','remember-negative')]
+    [ValidateSet('doctor','start','analyze','night','health','handoff','resume','verify','pr-summary','queue','benchmark','stats','failure','remember-regression','remember-negative')]
     [string]$Command,
 
     [string]$ProjectPath = '.',
@@ -29,7 +29,9 @@ param(
     [string[]]$Files = @(),
     [string]$Attempt = '',
     [string]$Outcome = '',
-    [bool]$EvidenceChanged = $false
+    [bool]$EvidenceChanged = $false,
+    [ValidateRange(2,365)]
+    [int]$HealthHistoryLimit = 90
 )
 
 $ErrorActionPreference = 'Stop'
@@ -42,6 +44,7 @@ $Index = Join-Path $Root 'scripts\ados-index.ps1'
 $Quality = Join-Path $Root 'scripts\ados-quality.ps1'
 $MemoryV3 = Join-Path $Root 'scripts\ados-memory-v3.ps1'
 $Operations = Join-Path $Root 'scripts\ados-operations.ps1'
+$Health = Join-Path $Root 'scripts\ados-health.ps1'
 
 function Require-File {
     param([string]$Path)
@@ -117,6 +120,7 @@ function Invoke-Doctor {
     Require-File $Quality
     Require-File $MemoryV3
     Require-File $Operations
+    Require-File $Health
     & $DevCore doctor
     Write-Host ''
     Write-Host 'ADOS components:'
@@ -127,6 +131,7 @@ function Invoke-Doctor {
     Write-Host ('{0,-28} PASS' -f 'incremental / symbol index')
     Write-Host ('{0,-28} PASS' -f 'quality and evidence gates')
     Write-Host ('{0,-28} PASS' -f 'v3 memory and operations')
+    Write-Host ('{0,-28} PASS' -f 'project health and trends')
 }
 
 function Get-ElasticBudget {
@@ -214,7 +219,11 @@ switch ($Command) {
         Ensure-LocalExclude $repo
         & $Insights heatmap -ProjectPath $repo -MaxCommits $MaxCommits
         & $Insights graph -ProjectPath $repo -MaxFiles $MaxFiles
-        & $Operations night -ProjectPath $repo -MaxFiles $MaxFiles
+        & $Operations night -ProjectPath $repo -MaxFiles $MaxFiles -HealthHistoryLimit $HealthHistoryLimit
+    }
+    'health' {
+        Ensure-LocalExclude $repo
+        & $Operations health -ProjectPath $repo -MaxFiles $MaxFiles -HealthHistoryLimit $HealthHistoryLimit
     }
     'handoff' {
         Ensure-LocalExclude $repo

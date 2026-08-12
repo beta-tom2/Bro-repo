@@ -45,6 +45,9 @@ ADOS orchestrates DevCore, incremental indexes, project memory, verification evi
 .\ados.ps1 night `
   -ProjectPath "C:\path\to\repo"
 
+.\ados.ps1 health `
+  -ProjectPath "C:\path\to\repo"
+
 .\ados.ps1 handoff `
   -ProjectPath "C:\path\to\repo"
 
@@ -120,6 +123,7 @@ ADOS orchestrates DevCore, incremental indexes, project memory, verification evi
 - Checkpoint and Resume: records task, branch, HEAD, baseline changes, and continuation phase.
 - Queue Engine: maintains a local priority queue; queue inspection never executes a task by itself.
 - Night Mode: refreshes indexes, decisions, audits, queue status, and usage summaries without model calls or product-code changes.
+- Project Health and Trends: compares deterministic metrics with optional project-owned `.ados/health.json` thresholds and keeps a bounded local trend history.
 - Usage Analytics: records local stage duration and byte-selection estimates, not claimed billing data.
 - A/B Benchmark: compares fixed lexical selection with elastic symbol-aware selection using deterministic proxy metrics.
 
@@ -149,6 +153,8 @@ DevCore and ADOS do not give local models permission to modify product code. Loc
 Security, authentication, permissions, RLS, migrations, production, releases, financial logic, dependencies, and architecture remain protected domains.
 
 Built-in adapters add project-specific protected boundaries. ATLAS keeps live trading, broker access, real money, and risk gates protected. NAVIRA keeps Supabase RLS, SQL migrations, authentication, notifications, and production EAS builds protected. These adapters are advisory and do not modify the projects. A future project can provide `.ados/adapter.json` using `template/.ados/adapter.example.json` as a starting point.
+
+Projects may also copy `template/.ados/health.example.json` to `.ados/health.json` and tune known thresholds. ADOS never creates or edits that project-owned file. Without it, conservative built-in thresholds are used. Health snapshots and reports remain local under `.ai/analytics/`; identical consecutive states replace the latest snapshot instead of growing history.
 
 ## Verification
 
