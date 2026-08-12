@@ -21,12 +21,16 @@ User task
   -> DevCore Context Engine
   -> Repair Memory Search
   -> Heat Map
-  -> Knowledge Graph
+  -> Incremental Hash and Symbol Indexes
+  -> Project Adapter and ADR / Negative Memory
+  -> Elastic Context
   -> Fix DNA
   -> Prompt Packet
   -> Codex or Local Read-Only Review
-  -> Focused Checks
-  -> Handoff
+  -> Scope Guard
+  -> Verification Ladder
+  -> Evidence Gate
+  -> Checkpoint / Handoff
 ```
 
 ## Modules
@@ -61,6 +65,21 @@ Runs deterministic read-only checks for TODO markers, large source files, confli
 ### Handoff
 Captures branch, commit, working tree, generated context, checks, task route, and continuation instructions.
 
+### Incremental Hash and Symbol Indexes
+Every supported source file receives a SHA-256 content hash. Unchanged records reuse prior import and symbol analysis. The symbol index stores declarations with kind, file, and line; it is deterministic and requires no embeddings or hosted database.
+
+### Elastic Context
+Task risk selects a 30 KB small, 90 KB medium, 180 KB large, or 240 KB protected budget. Changed files, exact path terms, symbol names, and imports determine priority. Generated maps remain navigation aids and source remains authoritative.
+
+### Quality gates
+Scope Guard compares changes against the pre-task checkpoint and allowed paths. Verification Ladder records bounded levels from patch integrity through build checks. Evidence Gate returns `UNVERIFIED` unless the required diff, verification result, scope result, and secret-pattern check all pass.
+
+### Error, regression, and decision memory
+Error Fingerprinting removes unstable paths, line numbers, hashes, and large numbers before creating a local signature. Regression Memory associates tasks and fingerprints with approved deterministic commands. ADR Memory indexes repository decision documents, while Negative Memory records failed approaches that should not be repeated without changed evidence.
+
+### Operations
+Project adapters identify protected boundaries for ATLAS, NAVIRA, BPMN Studio, and generic projects. Checkpoint/Resume prevents silent branch drift. Queue Engine stores work locally but does not execute it implicitly. Night Mode performs read-only indexing and reporting without model calls. Usage analytics and A/B benchmarks report deterministic byte and timing proxies, never claimed token billing.
+
 ## Storage
 
 Generated local data is stored under:
@@ -70,6 +89,10 @@ Generated local data is stored under:
 .ai/memory/
 .ai/analytics/
 .ai/local-output/
+.ai/index/
+.ai/evidence/
+.ai/checkpoints/
+.ai/queue/
 ```
 
 Generated files should remain ignored by Git unless a repository explicitly decides otherwise.
@@ -81,6 +104,8 @@ Generated files should remain ignored by Git unless a repository explicitly deci
 3. Local-model output is untrusted until verified.
 4. Generated maps are navigation aids.
 5. Security, authentication, permissions, migrations, production, releases, financial logic, and architectural decisions require Codex-level review and repository-specific authorization.
+6. Ollama remains read-only and its output cannot satisfy Evidence Gate by itself.
+7. Project adapters never override repository AGENTS.md, ADRs, or existing ATLAS/NAVIRA configuration.
 
 ## No-paid-API boundary
 

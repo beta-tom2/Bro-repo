@@ -1,0 +1,7 @@
+{
+  "name": "project-name",
+  "technologies": ["framework", "database"],
+  "protectedBoundaries": ["authentication", "production", "architecture"],
+  "contextRoots": ["src", "tests", "docs"],
+  "verificationHints": ["typecheck", "focused tests", "git diff --check"]
+}

@@ -29,7 +29,7 @@ Free local development infrastructure for ATLAS, NAVIRA, and future projects.
 
 ## ADOS commands
 
-ADOS orchestrates DevCore, repair memory, Heat Map, Knowledge Graph, Fix DNA, prompt packets, audits, and handoffs.
+ADOS orchestrates DevCore, incremental indexes, project memory, verification evidence, local queues, audits, and handoffs. It prepares work and verifies evidence; it does not silently edit product code or call a paid model API.
 
 ```powershell
 .\ados.ps1 doctor
@@ -47,7 +47,49 @@ ADOS orchestrates DevCore, repair memory, Heat Map, Knowledge Graph, Fix DNA, pr
 
 .\ados.ps1 handoff `
   -ProjectPath "C:\path\to\repo"
+
+.\ados.ps1 resume `
+  -ProjectPath "C:\path\to\repo"
+
+.\ados.ps1 verify `
+  -ProjectPath "C:\path\to\repo" `
+  -Task "Fix the friends flow" `
+  -AllowedScope @("src\friends", "tests\friends") `
+  -MaxVerificationLevel 3
+
+.\ados.ps1 queue `
+  -ProjectPath "C:\path\to\repo" `
+  -QueueAction add `
+  -Task "Prepare the next read-only audit" `
+  -Priority normal
+
+.\ados.ps1 benchmark `
+  -ProjectPath "C:\path\to\repo" `
+  -Task "Fix the friends flow"
+
+.\ados.ps1 stats `
+  -ProjectPath "C:\path\to\repo"
+
+.\ados.ps1 failure `
+  -ProjectPath "C:\path\to\repo" `
+  -Task "Fix the friends flow" `
+  -LogPath ".\test-output.log"
+
+.\ados.ps1 remember-regression `
+  -ProjectPath "C:\path\to\repo" `
+  -Task "Fix the friends flow" `
+  -RegressionCommand "npm test -- friends" `
+  -Files @("src\friends.ts", "tests\friends.test.ts")
+
+.\ados.ps1 remember-negative `
+  -ProjectPath "C:\path\to\repo" `
+  -Task "Fix the friends flow" `
+  -Attempt "Change RLS" `
+  -Outcome "Not the root cause" `
+  -Files @("src\friends.ts")
 ```
+
+`start` saves a pre-change checkpoint, detects the project adapter, refreshes local memory, builds symbol-aware elastic context, and creates the prompt packet and handoff. `verify` runs Scope Guard, the bounded Verification Ladder, and Evidence Gate. A task is reported as `VERIFIED` only when required evidence was actually observed.
 
 ## ADOS modules
 
@@ -60,6 +102,22 @@ ADOS orchestrates DevCore, repair memory, Heat Map, Knowledge Graph, Fix DNA, pr
 - Fix DNA: records task terms, route, domains, and changed files.
 - Night Audit: reports conflict markers, large files, TODOs, and repository status without editing code.
 - Handoff: creates a resumable continuation packet.
+- Incremental Hash Index: hashes source files and reuses imports and symbols when content did not change.
+- Symbol Index: maps functions, classes, types, and other language-level declarations to files and lines.
+- Elastic Context: chooses a small, medium, large, or protected context budget from task risk and expands only when needed.
+- Error Fingerprinting: normalizes failures into stable local signatures and recurrence counts.
+- Regression Memory: links bugs, related files, and approved deterministic regression commands.
+- ADR and Negative Memory: retrieves accepted decisions and rejected approaches relevant to the current task.
+- Log Compressor: keeps the first root failure, useful stack frames, and repeat counts instead of full noisy logs.
+- Scope Guard: compares post-checkpoint changes with explicit allowed scope and protected paths.
+- Verification Ladder: stops at the requested level and records each observed check.
+- Evidence Gate: refuses a verified status when diff, checks, scope evidence, or secret scanning is missing.
+- Project Adapters: detects ATLAS, NAVIRA, BPMN Studio, and generic web/mobile boundaries without rewriting project settings.
+- Checkpoint and Resume: records task, branch, HEAD, baseline changes, and continuation phase.
+- Queue Engine: maintains a local priority queue; queue inspection never executes a task by itself.
+- Night Mode: refreshes indexes, decisions, audits, queue status, and usage summaries without model calls or product-code changes.
+- Usage Analytics: records local stage duration and byte-selection estimates, not claimed billing data.
+- A/B Benchmark: compares fixed lexical selection with elastic symbol-aware selection using deterministic proxy metrics.
 
 Architecture details are in `docs/ADOS_ARCHITECTURE.md`.
 
@@ -72,6 +130,10 @@ ADOS may create files under:
 .ai/memory/
 .ai/analytics/
 .ai/local-output/
+.ai/index/
+.ai/evidence/
+.ai/checkpoints/
+.ai/queue/
 ```
 
 The orchestrator adds them to `.git/info/exclude` so they remain local even when a project does not yet contain shared ignore rules.
@@ -81,3 +143,15 @@ The orchestrator adds them to `.git/info/exclude` so they remain local even when
 DevCore and ADOS do not give local models permission to modify product code. Local-model output, generated dependency maps, historical similarity, Heat Map scores, and audit findings are advisory until verified against source code, deterministic checks, and Codex review.
 
 Security, authentication, permissions, RLS, migrations, production, releases, financial logic, dependencies, and architecture remain protected domains.
+
+Built-in adapters add project-specific protected boundaries. ATLAS keeps live trading, broker access, real money, and risk gates protected. NAVIRA keeps Supabase RLS, SQL migrations, authentication, notifications, and production EAS builds protected. These adapters are advisory and do not modify the projects. A future project can provide `.ados/adapter.json` using `template/.ados/adapter.example.json` as a starting point.
+
+## Verification
+
+Run the deterministic integration fixture under Windows PowerShell 5.1:
+
+```powershell
+.\tests\ados-smoke.ps1
+```
+
+The test creates an isolated Git fixture under `tests/.work/`, exercises the complete v0.3 pipeline, and expects `ADOS v0.3 smoke test: PASS`.
