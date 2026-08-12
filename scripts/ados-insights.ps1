@@ -163,8 +163,8 @@ function Invoke-FixDna {
     Push-Location $Root
     try {
         $changed = @()
-        $changed += (& git diff --name-only)
-        $changed += (& git diff --cached --name-only)
+        $changed += (& git -c core.safecrlf=false diff --name-only)
+        $changed += (& git -c core.safecrlf=false diff --cached --name-only)
         $changed += (& git ls-files --others --exclude-standard)
         $changed = @($changed | Where-Object { $_ } | Sort-Object -Unique)
         $terms = Normalize-Terms $TaskText

@@ -205,8 +205,8 @@ function Invoke-Handoff {
         $branch = (& git branch --show-current | Out-String).Trim()
         $head = (& git rev-parse HEAD | Out-String).Trim()
         $status = (& git status --short | Out-String).TrimEnd()
-        $diff = (& git diff --stat | Out-String).TrimEnd()
-        $staged = (& git diff --cached --stat | Out-String).TrimEnd()
+        $diff = (& git -c core.safecrlf=false diff --stat | Out-String).TrimEnd()
+        $staged = (& git -c core.safecrlf=false diff --cached --stat | Out-String).TrimEnd()
         $recent = (& git log -n 8 --pretty=format:'%h %ad %s' --date=short | Out-String).TrimEnd()
 
         $testsPath = Join-Path $Root '.ai\context\test-plan.generated.md'

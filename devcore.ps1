@@ -11,8 +11,11 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
-$DevCoreRoot = Split-Path -Parent $MyInvocation.MyCommand.Path
-$RegistryPath = Join-Path ([Environment]::GetFolderPath('UserProfile')) '.albert-devcore\projects.json'
+$DevCoreRoot = $PSScriptRoot
+$RegistryBase = $env:USERPROFILE
+if (-not $RegistryBase) { $RegistryBase = $HOME }
+if (-not $RegistryBase) { $RegistryBase = $DevCoreRoot }
+$RegistryPath = Join-Path $RegistryBase '.albert-devcore\projects.json'
 
 function Ensure-Directory {
     param([string]$Path)
@@ -72,7 +75,13 @@ function Invoke-Doctor {
 
 function Add-IgnoreRules {
     param([string]$Root)
-    $ignore = Join-Path $Root '.gitignore'
+    Push-Location $Root
+    try { $ignore = (& git rev-parse --git-path info/exclude 2>$null | Out-String).Trim() }
+    finally { Pop-Location }
+    if (-not $ignore) { throw "Unable to resolve Git exclude path for $Root" }
+    if (-not [IO.Path]::IsPathRooted($ignore)) { $ignore = Join-Path $Root $ignore }
+    $ignore = [IO.Path]::GetFullPath($ignore)
+    Ensure-Directory (Split-Path -Parent $ignore)
     $required = @(
         '.ai/context/session-context.md',
         '.ai/context/repo-map.generated.md',
@@ -83,9 +92,9 @@ function Add-IgnoreRules {
         '.ai/cache/',
         '*.local-ai.log'
     )
-    $existing = if (Test-Path $ignore) { @(Get-Content $ignore) } else { @() }
+    $existing = if (Test-Path -LiteralPath $ignore) { @(Get-Content -LiteralPath $ignore) } else { @() }
     foreach ($line in $required) {
-        if ($existing -notcontains $line) { Add-Content -Path $ignore -Value $line -Encoding UTF8 }
+        if ($existing -notcontains $line) { Add-Content -LiteralPath $ignore -Value $line -Encoding UTF8 }
     }
 }
 
@@ -103,8 +112,8 @@ function Get-ChangedFiles {
     Push-Location $Root
     try {
         $items = @()
-        $items += (& git diff --name-only)
-        $items += (& git diff --cached --name-only)
+        $items += (& git -c core.safecrlf=false diff --name-only)
+        $items += (& git -c core.safecrlf=false diff --cached --name-only)
         $items += (& git ls-files --others --exclude-standard)
         return @($items | Where-Object { $_ } | Sort-Object -Unique)
     } finally { Pop-Location }
@@ -205,7 +214,7 @@ function Invoke-Update {
         $branch = (& git branch --show-current | Out-String).Trim()
         $head = (& git rev-parse HEAD | Out-String).Trim()
         $status = (& git status --short | Out-String).TrimEnd()
-        $diff = (& git diff --stat | Out-String).TrimEnd()
+        $diff = (& git -c core.safecrlf=false diff --stat | Out-String).TrimEnd()
         $recent = (& git log -n 12 --pretty=format:'%h %ad %s' --date=short | Out-String).TrimEnd()
         $changed = Get-ChangedFiles $root
         $exclude = @('.git','node_modules','dist','build','.next','.expo','coverage','.ai','ios','android')

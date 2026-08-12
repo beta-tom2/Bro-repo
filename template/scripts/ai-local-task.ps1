@@ -57,5 +57,6 @@ $outputPath = Join-Path $outputDir ((Get-Date -Format 'yyyyMMdd-HHmmss') + '.md'
 $response = $prompt | & ollama run $Model
 if ($LASTEXITCODE -ne 0) { throw "Ollama failed with exit code $LASTEXITCODE." }
 $report = "# Local AI result`n`nGenerated: $(Get-Date -Format o)`nModel: $Model`nFiles: $($Files.Count)`nInput bytes: $totalBytes`n`n## Task`n`n$Task`n`n## Result`n`n$(($response | Out-String).TrimEnd())`n`n## Trust boundary`n`nUntrusted local-model output. Verify with source files, deterministic tools, tests and Codex."
-[IO.File]::WriteAllText($outputPath,$report,[Text.UTF8Encoding]::new($false))
+$encoding = New-Object System.Text.UTF8Encoding($false)
+[IO.File]::WriteAllText($outputPath,$report,$encoding)
 Write-Host "Local AI result written to $outputPath"

@@ -12,7 +12,7 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
-$Root = Split-Path -Parent $MyInvocation.MyCommand.Path
+$Root = $PSScriptRoot
 $DevCore = Join-Path $Root 'devcore.ps1'
 $Memory = Join-Path $Root 'scripts\devcore-memory.ps1'
 $Insights = Join-Path $Root 'scripts\ados-insights.ps1'
@@ -37,7 +37,12 @@ function Resolve-RepoRoot {
 
 function Ensure-LocalExclude {
     param([string]$Repo)
-    $exclude = Join-Path $Repo '.git\info\exclude'
+    Push-Location $Repo
+    try { $exclude = (& git rev-parse --git-path info/exclude 2>$null | Out-String).Trim() }
+    finally { Pop-Location }
+    if (-not $exclude) { throw "Unable to resolve Git exclude path for $Repo" }
+    if (-not [IO.Path]::IsPathRooted($exclude)) { $exclude = Join-Path $Repo $exclude }
+    $exclude = [IO.Path]::GetFullPath($exclude)
     $rules = @(
         '.ai/memory/',
         '.ai/analytics/',
@@ -52,9 +57,9 @@ function Ensure-LocalExclude {
         '.ai/context/fix-dna.generated.md',
         '.ai/local-output/'
     )
-    $existing = if (Test-Path $exclude) { @(Get-Content $exclude) } else { @() }
+    $existing = if (Test-Path -LiteralPath $exclude) { @(Get-Content -LiteralPath $exclude) } else { @() }
     foreach ($rule in $rules) {
-        if ($existing -notcontains $rule) { Add-Content -Path $exclude -Value $rule -Encoding UTF8 }
+        if ($existing -notcontains $rule) { Add-Content -LiteralPath $exclude -Value $rule -Encoding UTF8 }
     }
 }
 

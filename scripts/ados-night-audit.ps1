@@ -29,7 +29,8 @@ function Ensure-Directory {
 function Write-Utf8NoBom {
     param([string]$Path,[string]$Content)
     Ensure-Directory (Split-Path -Parent $Path)
-    [IO.File]::WriteAllText($Path,$Content,[Text.UTF8Encoding]::new($false))
+    $encoding = New-Object System.Text.UTF8Encoding($false)
+    [IO.File]::WriteAllText($Path,$Content,$encoding)
 }
 
 $root = Resolve-RepoRoot $ProjectPath
