@@ -35,3 +35,12 @@
 - [x] PR evidence summary generated from the local Evidence Gate artifacts, with repository-state freshness validation.
 
 No roadmap item may require a paid third-party AI API. Ollama remains read-only, and protected work continues to require Codex-level review.
+
+## v0.4 - Autonomous and approval-aware execution
+
+- [x] single-task queue leases with stale-lease recovery and bounded retries;
+- [x] central route enforcement for deterministic, Ollama, and Codex work;
+- [x] automatic bounded read-only Ollama first pass for local-safe tasks;
+- [x] generated Codex handoff with exact completion and release commands;
+- [x] Draft-PR-only background-agent contract with protected-domain stops;
+- [ ] activate and observe ChatGPT Scheduled Tasks for NAVIRA and ATLAS after v0.4 merges.

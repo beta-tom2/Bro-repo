@@ -50,6 +50,10 @@ ADOS orchestrates DevCore, incremental indexes, project memory, verification evi
   -SchedulerAction preview `
   -DailyAt "03:00"
 
+.\ados.ps1 dispatch `
+  -ProjectPath "C:\path\to\repo" `
+  -DispatchAction run
+
 .\ados.ps1 health `
   -ProjectPath "C:\path\to\repo"
 
@@ -131,11 +135,25 @@ ADOS orchestrates DevCore, incremental indexes, project memory, verification evi
 - Queue Engine: maintains a local priority queue; queue inspection never executes a task by itself.
 - Night Mode: refreshes indexes, decisions, audits, queue status, and usage summaries without model calls or product-code changes.
 - Night Mode Scheduler: previews, installs, inspects, or removes one project-scoped Windows task; install and uninstall require explicit confirmation and use the current interactive user with Limited privileges.
+- Autonomous Dispatcher: leases one queued task, applies the central route policy, optionally runs bounded read-only Ollama, prepares Codex context, and requires the exact lease for completion or release.
 - Project Health and Trends: compares deterministic metrics with optional project-owned `.ados/health.json` thresholds and keeps a bounded local trend history.
 - Usage Analytics: records local stage duration and byte-selection estimates, not claimed billing data.
 - A/B Benchmark: compares fixed lexical selection with elastic symbol-aware selection using deterministic proxy metrics.
 
 Architecture details are in `docs/ADOS_ARCHITECTURE.md`.
+
+### Autonomous queued work
+
+Add work to the local queue, then let a Codex or ChatGPT Scheduled Task call the dispatcher:
+
+```powershell
+.\ados.ps1 queue -ProjectPath "C:\path\to\repo" -QueueAction add -Task "Review README wording" -Priority low
+.\ados.ps1 dispatch -ProjectPath "C:\path\to\repo" -DispatchAction run
+```
+
+The dispatcher claims at most one task with a time-bounded lease and writes `.ai/queue/dispatch.generated.json` plus a concise agent handoff. A second run returns `BUSY` until the lease is completed, released, or expires. Documentation and other low-risk work may receive an automatic read-only Ollama first pass; all edits and every protected domain remain Codex-owned. Completion and release require the exact queue ID and lease ID. The dispatcher never merges, deploys, or changes production.
+
+The recommended background agent prompt and lifecycle are documented in `docs/ADOS_AUTONOMOUS_DISPATCHER.md`. For local-project Scheduled Tasks, keep the computer on, ChatGPT desktop running, and the repository available at its configured path.
 
 ### Optional Windows schedule
 
@@ -195,7 +213,7 @@ Run the deterministic integration fixture under Windows PowerShell 5.1:
 .\tests\ados-smoke.ps1
 ```
 
-The test creates an isolated Git fixture under `tests/.work/`, exercises the complete v0.3 pipeline, and expects `ADOS v0.3 smoke test: PASS`.
+The test creates an isolated Git fixture under `tests/.work/`, exercises the complete v0.4 pipeline, and expects `ADOS v0.4 smoke test: PASS`.
 
 Pull requests that touch ADOS code run the same parser and smoke checks on a standard Windows runner using Windows PowerShell 5.1. The workflow is deterministic, read-only outside its disposable fixture, and does not call a model or paid API.
 

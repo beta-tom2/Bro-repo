@@ -181,6 +181,28 @@ function Add-AdosUsageEvent {
     Write-AdosJson $path $payload 10
 }
 
+function Enter-AdosQueueLock {
+    param([string]$Root)
+
+    $directory = Join-Path $Root '.ai\queue'
+    Ensure-AdosDirectory $directory
+    $path = Join-Path $directory 'dispatcher.lock'
+    if (Test-Path -LiteralPath $path -PathType Leaf) {
+        $age = (Get-Date) - (Get-Item -LiteralPath $path).LastWriteTime
+        if ($age.TotalMinutes -gt 10) { Remove-Item -LiteralPath $path -Force }
+    }
+    try {
+        New-Item -ItemType File -Path $path -Value ("$PID|" + (Get-Date -Format o)) -ErrorAction Stop | Out-Null
+    }
+    catch { throw 'ADOS queue is busy: another process owns the queue lock.' }
+    return $path
+}
+
+function Exit-AdosQueueLock {
+    param([string]$Path)
+    if ($Path) { Remove-Item -LiteralPath $Path -Force -ErrorAction SilentlyContinue }
+}
+
 function ConvertTo-AdosMarkdownList {
     param([object[]]$Items, [string]$EmptyText = 'none')
     $lines = @($Items | ForEach-Object { '- `' + [string]$_ + '`' })
