@@ -36,11 +36,14 @@ function Read-Json([string]$Relative) {
     return (Get-Content -LiteralPath (Join-Path $ResolvedFixture $Relative) -Raw | ConvertFrom-Json)
 }
 
-Write-FixtureFile 'README.md' "# ADOS smoke fixture`r`n"
+Write-FixtureFile 'README.md' ("# ADOS smoke fixture`r`n" + ('large optional documentation ' * 5000))
 Write-FixtureFile 'src\friends.ts' "export function sendFriendRequest(userId: string): string { return userId; }`r`n"
 Write-FixtureFile 'tests\friends.test.ts' "import { sendFriendRequest } from '../src/friends';`r`n"
 Write-FixtureFile 'docs\adr\ADR-0001-friend-service.md' "# ADR-0001 Friend service boundary`r`n`r`nStatus: accepted`r`n`r`nFriend requests remain in the friend service.`r`n"
-Write-FixtureFile '.ados\adapter.json' '{"name":"smoke-custom","protectedBoundaries":["custom boundary"]}'
+Write-FixtureFile 'docs\project-brain\README.md' "# Project Brain`r`n"
+Write-FixtureFile 'docs\project-brain\CURRENT_FOCUS.md' "# Current focus`r`nFriend request safety.`r`n"
+Write-FixtureFile 'docs\project-brain\AGENT_ENTRYPOINTS.md' "# Agent entrypoints`r`nStart with friends service.`r`n"
+Write-FixtureFile '.ados\adapter.json' '{"name":"smoke-custom","protectedBoundaries":["custom boundary"],"contextEntrypoints":["docs/project-brain/README.md","docs/project-brain/CURRENT_FOCUS.md","docs/project-brain/AGENT_ENTRYPOINTS.md"]}'
 
 Push-Location $ResolvedFixture
 try {
@@ -63,6 +66,10 @@ $first = Read-Json '.ai\index\hash-index.generated.json'
 Assert-True ($first.stats.updated -ge 4) 'first index pass must analyze fixture files'
 Assert-True ((Read-Json '.ai\index\symbol-index.generated.json').symbolCount -ge 1) 'symbol index must find sendFriendRequest'
 Assert-True ((Read-Json '.ai\context\elastic-context.generated.json').selectedFiles.Count -ge 1) 'elastic context must select files'
+$initialElastic = Read-Json '.ai\context\elastic-context.generated.json'
+Assert-True (@($initialElastic.selectedFiles.path) -contains 'docs\project-brain\README.md') 'elastic context must prioritize repository entrypoints'
+Assert-True (@($initialElastic.selectedFiles.path) -notcontains 'README.md') 'oversized optional README must not consume elastic context budget'
+Assert-True (@($initialElastic.skippedBaseFiles.path) -contains 'README.md') 'elastic context must report the skipped oversized README'
 
 & $Index index -ProjectPath $ResolvedFixture -MaxFiles 100
 $second = Read-Json '.ai\index\hash-index.generated.json'
@@ -77,6 +84,11 @@ Push-Location $ResolvedFixture
 try { $statusAfterStart = (& git status --porcelain=v1 | Out-String).TrimEnd() }
 finally { Pop-Location }
 Assert-True ($statusBeforeStart -eq $statusAfterStart) 'ADOS start must keep generated context out of product Git status'
+$packet = Get-Content -LiteralPath (Join-Path $ResolvedFixture '.ai\context\prompt-packet.generated.md') -Raw
+Assert-True ($packet -match 'docs\\project-brain\\README.md') 'prompt packet must include the Project Brain entrypoint'
+Assert-True ($packet -match 'README.md \(over .* optional-base cap\)') 'prompt packet must report the oversized root README instead of selecting it'
+$sessionContext = Get-Content -LiteralPath (Join-Path $ResolvedFixture '.ai\context\session-context.md') -Raw
+Assert-True ($sessionContext.IndexOf('docs\project-brain\README.md') -lt $sessionContext.IndexOf('README.md when task-relevant')) 'session context must route Project Brain before the optional root README'
 
 & $Operations adapter -ProjectPath $ResolvedFixture
 $adapter = Read-Json '.ai\context\project-adapter.generated.json'
