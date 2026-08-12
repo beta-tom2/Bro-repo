@@ -45,6 +45,7 @@ Write-FixtureFile 'docs\project-brain\README.md' "# Project Brain`r`n"
 Write-FixtureFile 'docs\project-brain\CURRENT_FOCUS.md' "# Current focus`r`nFriend request safety.`r`n"
 Write-FixtureFile 'docs\project-brain\AGENT_ENTRYPOINTS.md' "# Agent entrypoints`r`nStart with friends service.`r`n"
 Write-FixtureFile '.ados\adapter.json' '{"name":"smoke-custom","protectedBoundaries":["custom boundary"],"contextEntrypoints":["docs/project-brain/README.md","docs/project-brain/CURRENT_FOCUS.md","docs/project-brain/AGENT_ENTRYPOINTS.md"]}'
+Write-FixtureFile '.ados\health.json' '{"schemaVersion":1,"historyLimit":5,"baselineWindow":3,"thresholds":{"maxConflictMarkers":0,"maxLargeSourceFiles":0,"maxTodoMarkers":0,"maxChangedFiles":10}}'
 
 Push-Location $ResolvedFixture
 try {
@@ -184,11 +185,41 @@ Assert-True ((Read-Json '.ai\queue\next.generated.json').next.status -eq 'pendin
 $benchmark = Read-Json '.ai\analytics\ab-benchmark.generated.json'
 Assert-True ($benchmark.incremental.secondUpdated -eq 0) 'benchmark second index pass must be incremental'
 Assert-True ([string]$benchmark.note -match 'no model API') 'benchmark must preserve the zero-paid-API boundary'
+Assert-True ([string]$benchmark.head -eq (Read-Json '.ai\index\hash-index.generated.json').head) 'benchmark must bind metrics to the current HEAD'
 
 & $Operations resume -ProjectPath $ResolvedFixture
 Assert-True ((Read-Json '.ai\context\resume.generated.json').safeToResume) 'checkpoint must be resumable on the same branch'
 & $Operations usage -ProjectPath $ResolvedFixture
 Assert-True ((Read-Json '.ai\analytics\usage-summary.generated.json').eventCount -ge 1) 'usage analytics must contain local events'
+
+& $Operations health -ProjectPath $ResolvedFixture -MaxFiles 100
+$health = Read-Json '.ai\analytics\health.generated.json'
+Assert-True ($health.status -eq 'HEALTHY') 'project health must pass project-owned thresholds for the clean fixture'
+Assert-True ($health.thresholdSource -eq '.ados/health.json') 'project health must report the project-owned threshold source'
+Assert-True ($health.historyCount -eq 1) 'first project health run must create one trend snapshot'
+Assert-True ((Read-Json '.ai\analytics\night-audit.generated.json').metrics.sourceFiles -ge 1) 'night audit must expose deterministic JSON metrics'
+& $Operations health -ProjectPath $ResolvedFixture -MaxFiles 100
+$duplicateHealth = Read-Json '.ai\analytics\health.generated.json'
+Assert-True ($duplicateHealth.historyCount -eq 1) 'identical consecutive health states must not grow history'
+Assert-True (-not $duplicateHealth.snapshotRecorded) 'identical health state must report snapshot replacement'
+
+Write-FixtureFile 'tests\friends.test.ts' "// TODO add a regression assertion`r`nimport { sendFriendRequest } from '../src/friends';`r`n"
+& $Operations health -ProjectPath $ResolvedFixture -MaxFiles 100
+$attentionHealth = Read-Json '.ai\analytics\health.generated.json'
+Assert-True ($attentionHealth.status -eq 'ATTENTION') 'project health must flag a project-owned threshold breach'
+Assert-True ($attentionHealth.historyCount -eq 2) 'changed health metrics must append a trend snapshot'
+$todoTrend = @($attentionHealth.trend | Where-Object { $_.metric -eq 'todoMarkers' })[0]
+Assert-True ($todoTrend.change -eq 'up') 'health trend must report an increased TODO count'
+Push-Location $ResolvedFixture
+try { & git restore -- tests\friends.test.ts }
+finally { Pop-Location }
+
+Write-FixtureFile '.ados\health.json' '{"schemaVersion":1,"thresholds":{"maxTodoMarkers":-1}}'
+& $Operations health -ProjectPath $ResolvedFixture -MaxFiles 100
+Assert-True ((Read-Json '.ai\analytics\health.generated.json').status -eq 'CONFIG_ERROR') 'invalid project health thresholds must fail closed'
+Push-Location $ResolvedFixture
+try { & git restore -- .ados\health.json }
+finally { Pop-Location }
 
 Push-Location $ResolvedFixture
 try { $statusBeforeNight = (& git status --porcelain=v1 | Out-String).TrimEnd() }
@@ -198,5 +229,7 @@ Push-Location $ResolvedFixture
 try { $statusAfterNight = (& git status --porcelain=v1 | Out-String).TrimEnd() }
 finally { Pop-Location }
 Assert-True ($statusBeforeNight -eq $statusAfterNight) 'night mode must not change product-code Git status'
+$nightSummary = Get-Content -LiteralPath (Join-Path $ResolvedFixture '.ai\analytics\night-mode.generated.md') -Raw
+Assert-True ($nightSummary -match 'Project health: HEALTHY') 'night mode must include current project health'
 
 Write-Host 'ADOS v0.3 smoke test: PASS'

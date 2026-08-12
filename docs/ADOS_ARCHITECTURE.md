@@ -31,6 +31,7 @@ User task
   -> Verification Ladder
   -> Evidence Gate
   -> PR Evidence Summary
+  -> Project Health and Trend Baseline
   -> Checkpoint / Handoff
 ```
 
@@ -79,7 +80,7 @@ Scope Guard compares changes against the pre-task checkpoint and allowed paths. 
 Error Fingerprinting removes unstable paths, line numbers, hashes, and large numbers before creating a local signature. Regression Memory associates tasks and fingerprints with approved deterministic commands. ADR Memory indexes repository decision documents, while Negative Memory records failed approaches that should not be repeated without changed evidence.
 
 ### Operations
-Project adapters identify protected boundaries for ATLAS, NAVIRA, BPMN Studio, and generic projects. Checkpoint/Resume prevents silent branch drift. Queue Engine stores work locally but does not execute it implicitly. Night Mode performs read-only indexing and reporting without model calls. Usage analytics and A/B benchmarks report deterministic byte and timing proxies, never claimed token billing.
+Project adapters identify protected boundaries for ATLAS, NAVIRA, BPMN Studio, and generic projects. Checkpoint/Resume prevents silent branch drift. Queue Engine stores work locally but does not execute it implicitly. Night Mode performs read-only indexing and reporting without model calls. Project Health reads optional project-owned thresholds, compares them with current deterministic metrics, and stores a bounded local history with previous and rolling-baseline deltas. Invalid configuration produces `CONFIG_ERROR`; missing optional metrics are skipped instead of invented. Usage analytics and A/B benchmarks report deterministic byte and timing proxies, never claimed token billing.
 
 ## Storage
 
