@@ -17,6 +17,16 @@ Pause only for:
 4. Inspect the smallest relevant symbol and file set.
 5. Expand scope only when imports, references, tests or architecture require it.
 
+## Albert Dev Skills
+- Before medium, complex, unfamiliar, risky, design, architecture, debugging, database, release, review, or skill-discovery work, apply the `albert-skill-router` policy when available.
+- Skills are selective capabilities, not a mandatory stack. Start with zero optional skills and load only the smallest set with a positive expected benefit.
+- Installed does not mean always invoked.
+- Explicit user instructions, this repository's rules, nearest scoped `AGENTS.md`, and DevCore/ADOS protected-domain rules override third-party skill guidance.
+- Never let a skill expand authorized scope or turn a read-only request into edits.
+- Newly discovered third-party skills are deny-by-default until audited and added to the Albert approved-skill registry.
+- For broad architecture reviews, use the approved Matt Pocock architecture suite only when architecture is actually in scope; do not use it for tiny local refactors.
+- For completion claims, deterministic repository checks and ADOS Evidence Gate remain stronger evidence than a skill's narrative assessment.
+
 ## Free-only AI policy
 - Do not add paid third-party AI APIs.
 - Use deterministic tools before a model.
