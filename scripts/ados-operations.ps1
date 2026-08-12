@@ -47,6 +47,7 @@ function Get-AdosProjectAdapter {
     $boundaries = @('secrets','credentials','production','release','architecture','dependencies')
     $roots = @('src','app','tests','docs')
     $checks = @('git diff --check')
+    $entrypoints = @()
 
     if ($repoName -match 'atlas.*market|market.*atlas') {
         $adapter = 'atlas-market-os'
@@ -63,6 +64,11 @@ function Get-AdosProjectAdapter {
         $boundaries += @('Supabase RLS','SQL migrations','authentication','EAS production builds','notifications')
         $roots = @('app','src','components','services','supabase','tests')
         $checks += @('typecheck','focused social-flow tests','Supabase security checks')
+        $entrypoints += @(
+            'docs/project-brain/README.md',
+            'docs/project-brain/CURRENT_FOCUS.md',
+            'docs/project-brain/AGENT_ENTRYPOINTS.md'
+        )
     }
     elseif ($hasBpmn) {
         $adapter = 'bpmn-studio'
@@ -92,6 +98,7 @@ function Get-AdosProjectAdapter {
             if ($propertyNames -contains 'protectedBoundaries' -and $adapterConfig.protectedBoundaries) { $boundaries += @($adapterConfig.protectedBoundaries) }
             if ($propertyNames -contains 'contextRoots' -and $adapterConfig.contextRoots) { $roots = @($adapterConfig.contextRoots) }
             if ($propertyNames -contains 'verificationHints' -and $adapterConfig.verificationHints) { $checks += @($adapterConfig.verificationHints) }
+            if ($propertyNames -contains 'contextEntrypoints' -and $adapterConfig.contextEntrypoints) { $entrypoints += @($adapterConfig.contextEntrypoints) }
             $detectedBy = '.ados/adapter.json'
         }
     }
@@ -105,6 +112,7 @@ function Get-AdosProjectAdapter {
         technologies = @($tech | Sort-Object -Unique)
         protectedBoundaries = @($boundaries | Sort-Object -Unique)
         contextRoots = @($roots | Sort-Object -Unique)
+        contextEntrypoints = @($entrypoints | Sort-Object -Unique)
         verificationHints = @($checks | Sort-Object -Unique)
         mutationPolicy = 'adapter is advisory and never edits product configuration'
     }
@@ -116,6 +124,8 @@ function Get-AdosProjectAdapter {
     $lines += ConvertTo-AdosMarkdownList $payload.protectedBoundaries
     $lines += @('','## Context roots')
     $lines += ConvertTo-AdosMarkdownList $payload.contextRoots
+    $lines += @('','## Context entrypoints')
+    $lines += ConvertTo-AdosMarkdownList $payload.contextEntrypoints
     $lines += @('','## Safety','- Advisory only. Existing project configuration was not changed.')
     Write-AdosUtf8 (Join-Path $Root '.ai\context\project-adapter.generated.md') ($lines -join "`r`n")
     Write-Host "Project adapter: $adapter ($detectedBy)"

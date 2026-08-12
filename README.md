@@ -112,7 +112,7 @@ ADOS orchestrates DevCore, incremental indexes, project memory, verification evi
 - Scope Guard: compares post-checkpoint changes with explicit allowed scope and protected paths.
 - Verification Ladder: stops at the requested level and records each observed check.
 - Evidence Gate: refuses a verified status when diff, checks, scope evidence, or secret scanning is missing.
-- Project Adapters: detects ATLAS, NAVIRA, BPMN Studio, and generic web/mobile boundaries without rewriting project settings.
+- Project Adapters: detects ATLAS, NAVIRA, BPMN Studio, and generic web/mobile boundaries, supplies repository entrypoints, and never rewrites project settings.
 - Checkpoint and Resume: records task, branch, HEAD, baseline changes, and continuation phase.
 - Queue Engine: maintains a local priority queue; queue inspection never executes a task by itself.
 - Night Mode: refreshes indexes, decisions, audits, queue status, and usage summaries without model calls or product-code changes.

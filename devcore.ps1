@@ -232,7 +232,18 @@ function Invoke-Update {
         Write-Utf8NoBom (Join-Path $root '.ai\context\repo-map.generated.md') ($map -join "`r`n")
         New-ImportMap $root
         $null = Get-TestRecommendations $root $changed
-        $ctx = "# Session context`r`n`r`nGenerated: $(Get-Date -Format o)`r`nBranch: $branch`r`nCommit: $head`r`n`r`n## Working tree`r`n$(if ($status) {$status} else {'clean'})`r`n`r`n## Diff summary`r`n$(if ($diff) {$diff} else {'none'})`r`n`r`n## Recent commits`r`n$recent`r`n`r`n## Read order`r`n1. AGENTS.md`r`n2. README.md`r`n3. .ai/context/current-state.md`r`n4. .ai/context/decisions.md`r`n5. .ai/context/repo-map.generated.md`r`n6. .ai/context/import-map.generated.md`r`n7. .ai/context/test-plan.generated.md`r`n8. changed files and focused tests`r`n"
+        $readOrder = @('AGENTS.md') + @(Get-ContextEntrypoints $root) + @(
+            '.ai/context/current-state.md',
+            '.ai/context/decisions.md',
+            '.ai/context/repo-map.generated.md',
+            '.ai/context/import-map.generated.md',
+            '.ai/context/test-plan.generated.md',
+            'changed files and focused tests',
+            'README.md when task-relevant and within the optional-base budget'
+        )
+        $readLines = New-Object Collections.Generic.List[string]
+        for ($i = 0; $i -lt $readOrder.Count; $i++) { $readLines.Add("$($i + 1). $($readOrder[$i])") }
+        $ctx = "# Session context`r`n`r`nGenerated: $(Get-Date -Format o)`r`nBranch: $branch`r`nCommit: $head`r`n`r`n## Working tree`r`n$(if ($status) {$status} else {'clean'})`r`n`r`n## Diff summary`r`n$(if ($diff) {$diff} else {'none'})`r`n`r`n## Recent commits`r`n$recent`r`n`r`n## Read order`r`n$($readLines -join "`r`n")`r`n"
         Write-Utf8NoBom (Join-Path $root '.ai\context\session-context.md') $ctx
         Write-Host "Updated DevCore context for $root"
     } finally { Pop-Location }
@@ -253,6 +264,29 @@ function Get-TaskTerms {
     return @([regex]::Matches($TaskText.ToLowerInvariant(),'[\p{L}\p{Nd}_-]{4,}') | ForEach-Object { $_.Value } | Sort-Object -Unique | Select-Object -First 12)
 }
 
+function Get-ContextEntrypoints {
+    param([string]$Root)
+
+    $entrypoints = @()
+    foreach ($path in @('.ai\context\project-adapter.generated.json','.ados\adapter.json')) {
+        $full = Join-Path $Root $path
+        if (-not (Test-Path -LiteralPath $full -PathType Leaf)) { continue }
+        try {
+            $data = Get-Content -LiteralPath $full -Raw | ConvertFrom-Json
+            $propertyNames = @($data.PSObject.Properties | ForEach-Object { $_.Name })
+            if ($propertyNames -contains 'contextEntrypoints') { $entrypoints += @($data.contextEntrypoints) }
+        }
+        catch { }
+    }
+    $projectBrain = @(
+        'docs/project-brain/README.md',
+        'docs/project-brain/CURRENT_FOCUS.md',
+        'docs/project-brain/AGENT_ENTRYPOINTS.md'
+    )
+    if (Test-Path -LiteralPath (Join-Path $Root $projectBrain[0]) -PathType Leaf) { $entrypoints += $projectBrain }
+    return @($entrypoints | Where-Object { $_ } | ForEach-Object { ([string]$_).Replace('/', '\') } | Sort-Object -Unique)
+}
+
 function Invoke-Packet {
     param([string]$Path,[string]$TaskText,[int]$Budget)
     if (-not $TaskText) { throw 'Task is required for packet.' }
@@ -271,13 +305,22 @@ function Invoke-Packet {
             }
         }
         foreach ($changed in (Get-ChangedFiles $root)) { if ($candidateFiles -notcontains $changed) { $candidateFiles.Insert(0,$changed) } }
-        $baseFiles = @('AGENTS.md','README.md','.ai/context/current-state.md','.ai/context/decisions.md','.ai/context/repo-map.generated.md','.ai/context/import-map.generated.md','.ai/context/test-plan.generated.md')
+        $entrypoints = @(Get-ContextEntrypoints $root)
+        $baseFiles = @('AGENTS.md') + $entrypoints + @('.ai/context/current-state.md','.ai/context/decisions.md','.ai/context/repo-map.generated.md','.ai/context/import-map.generated.md','.ai/context/test-plan.generated.md')
+        $optionalBaseFiles = @('README.md')
+        $maxOptionalBaseBytes = [long]($Budget / 4)
+        $skippedBaseFiles = New-Object Collections.Generic.List[string]
         $selected = New-Object Collections.Generic.List[string]
         $used = 0
-        foreach ($item in ($baseFiles + @($candidateFiles))) {
+        foreach ($item in ($baseFiles + $optionalBaseFiles + @($candidateFiles))) {
             $full = Join-Path $root $item
             if (Test-Path $full -PathType Leaf) {
                 $size = (Get-Item $full).Length
+                if ($optionalBaseFiles -contains $item -and $size -gt $maxOptionalBaseBytes) {
+                    if ($skippedBaseFiles -notcontains $item) { $skippedBaseFiles.Add($item) }
+                    continue
+                }
+                if ($skippedBaseFiles -contains $item) { continue }
                 if (($used + $size) -le $Budget -and $selected -notcontains $item) { $selected.Add($item); $used += $size }
             }
         }
@@ -286,6 +329,9 @@ function Invoke-Packet {
         $lines.Add("Generated: $(Get-Date -Format o)"); $lines.Add("Route: $route"); $lines.Add("Budget bytes: $Budget"); $lines.Add("Selected bytes: $used"); $lines.Add('')
         $lines.Add('## Task'); $lines.Add($TaskText); $lines.Add(''); $lines.Add('## Selected files')
         foreach ($item in $selected) { $lines.Add("- $item") }
+        $lines.Add(''); $lines.Add('## Skipped oversized base files')
+        if ($skippedBaseFiles.Count -eq 0) { $lines.Add('- none') }
+        else { foreach ($item in $skippedBaseFiles) { $lines.Add("- $item (over $maxOptionalBaseBytes byte optional-base cap)") } }
         $lines.Add(''); $lines.Add('## Execution rules')
         $lines.Add('- Read selected files first.'); $lines.Add('- Verify generated maps against source.'); $lines.Add('- Use deterministic checks before broad model reasoning.'); $lines.Add('- Do not use paid third-party AI APIs.'); $lines.Add('- Stop only for protected or genuinely ambiguous actions.')
         Write-Utf8NoBom (Join-Path $root '.ai\context\prompt-packet.generated.md') ($lines -join "`r`n")

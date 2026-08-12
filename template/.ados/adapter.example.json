@@ -3,5 +3,6 @@
   "technologies": ["framework", "database"],
   "protectedBoundaries": ["authentication", "production", "architecture"],
   "contextRoots": ["src", "tests", "docs"],
+  "contextEntrypoints": ["docs/project-brain/README.md", "docs/project-brain/CURRENT_FOCUS.md"],
   "verificationHints": ["typecheck", "focused tests", "git diff --check"]
 }

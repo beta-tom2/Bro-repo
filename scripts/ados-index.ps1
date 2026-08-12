@@ -234,6 +234,29 @@ function Get-AdosFileScore {
     return $score
 }
 
+function Get-AdosContextEntrypoints {
+    param([string]$Root)
+
+    $entrypoints = @()
+    $adapter = Read-AdosJson (Join-Path $Root '.ai\context\project-adapter.generated.json') $null
+    if ($adapter) {
+        $propertyNames = @($adapter.PSObject.Properties | ForEach-Object { $_.Name })
+        if ($propertyNames -contains 'contextEntrypoints') { $entrypoints += @($adapter.contextEntrypoints) }
+    }
+    $custom = Read-AdosJson (Join-Path $Root '.ados\adapter.json') $null
+    if ($custom) {
+        $propertyNames = @($custom.PSObject.Properties | ForEach-Object { $_.Name })
+        if ($propertyNames -contains 'contextEntrypoints') { $entrypoints += @($custom.contextEntrypoints) }
+    }
+    $projectBrain = @(
+        'docs/project-brain/README.md',
+        'docs/project-brain/CURRENT_FOCUS.md',
+        'docs/project-brain/AGENT_ENTRYPOINTS.md'
+    )
+    if (Test-Path -LiteralPath (Join-Path $Root $projectBrain[0]) -PathType Leaf) { $entrypoints += $projectBrain }
+    return @($entrypoints | Where-Object { $_ } | ForEach-Object { ([string]$_).Replace('/', '\') } | Sort-Object -Unique)
+}
+
 function Invoke-AdosElasticContext {
     param([string]$Root, [string]$TaskText, [string]$RequestedTier, $HashIndex, $SymbolIndex)
 
@@ -246,20 +269,31 @@ function Invoke-AdosElasticContext {
     $budget = Get-AdosContextBudget $tier
     $terms = @(Get-AdosTaskTerms $TaskText)
     $changed = @(Get-AdosChangedFiles $Root)
+    $entrypoints = @(Get-AdosContextEntrypoints $Root)
+    $requiredBaseFiles = @('AGENTS.md') + $entrypoints
     $baseFiles = @(
-        'AGENTS.md','README.md','.ai\context\current-state.md','.ai\context\decisions.md',
+        '.ai\context\current-state.md','.ai\context\decisions.md',
         '.ai\context\project-adapter.generated.md','.ai\context\decision-context.generated.md',
         '.ai\context\repo-map.generated.md','.ai\context\test-plan.generated.md'
     )
+    $optionalBaseFiles = @('README.md')
+    $maxOptionalBaseBytes = [long]($budget / 4)
 
     $selected = @()
+    $skippedBaseFiles = @()
     $used = 0
-    foreach ($base in $baseFiles) {
+    foreach ($base in ($requiredBaseFiles + $baseFiles + $optionalBaseFiles)) {
         $full = Join-Path $Root $base
         if (Test-Path -LiteralPath $full -PathType Leaf) {
             $size = (Get-Item -LiteralPath $full).Length
+            $isOptional = $optionalBaseFiles -contains $base
+            if ($isOptional -and $size -gt $maxOptionalBaseBytes) {
+                $skippedBaseFiles += [pscustomobject]@{ path=$base; bytes=[long]$size; reason="optional base file exceeds $maxOptionalBaseBytes byte cap" }
+                continue
+            }
             if (($used + $size) -le $budget) {
-                $selected += [pscustomobject]@{ path=$base; bytes=[long]$size; score=1000; reason='base context' }
+                $reason = if ($entrypoints -contains $base) { 'repository entrypoint' } else { 'base context' }
+                $selected += [pscustomobject]@{ path=$base; bytes=[long]$size; score=1000; reason=$reason }
                 $used += $size
             }
         }
@@ -277,6 +311,7 @@ function Invoke-AdosElasticContext {
         $path = [string]$candidate.entry.path
         $size = [long]$candidate.entry.bytes
         if (@($selected | Where-Object { [string]$_.path -eq $path }).Count -gt 0) { continue }
+        if (@($skippedBaseFiles | Where-Object { [string]$_.path -eq $path }).Count -gt 0) { continue }
         if (($used + $size) -gt $budget) { continue }
         $reason = 'task term or symbol match'
         if ($changed -contains $path) { $reason = 'changed file' }
@@ -299,6 +334,7 @@ function Invoke-AdosElasticContext {
         estimatedReductionPercent = $reduction
         terms = @($terms)
         selectedFiles = @($selected)
+        skippedBaseFiles = @($skippedBaseFiles)
     }
     $jsonPath = Join-Path $Root '.ai\context\elastic-context.generated.json'
     Write-AdosJson $jsonPath $payload 10
@@ -309,6 +345,9 @@ function Invoke-AdosElasticContext {
     )
     foreach ($item in $selected) { $lines += "- ``$($item.path)`` - $($item.bytes) bytes - $($item.reason)" }
     if ($selected.Count -eq 0) { $lines += '- none' }
+    $lines += @('','## Skipped oversized base files')
+    foreach ($item in $skippedBaseFiles) { $lines += "- ``$($item.path)`` - $($item.bytes) bytes - $($item.reason)" }
+    if ($skippedBaseFiles.Count -eq 0) { $lines += '- none' }
     Write-AdosUtf8 (Join-Path $Root '.ai\context\elastic-context.generated.md') ($lines -join "`r`n")
     Add-AdosUsageEvent $Root 'elastic-context' 'PASS' 0 $totalBytes $used @{ tier=$tier; files=$selected.Count; reductionPercent=$reduction }
     Write-Host "Elastic context written to $jsonPath ($tier, $used of $budget bytes)"
