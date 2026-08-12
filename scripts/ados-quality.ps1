@@ -1,7 +1,7 @@
 [CmdletBinding()]
 param(
     [Parameter(Position = 0, Mandatory = $true)]
-    [ValidateSet('fingerprint','compress','scope','verify','evidence','all')]
+    [ValidateSet('fingerprint','compress','scope','verify','evidence','pr-summary','all')]
     [string]$Command,
 
     [Parameter(Mandatory = $true)]
@@ -398,10 +398,13 @@ function Invoke-AdosEvidenceGate {
     $failed = @($requirements | Where-Object { -not $_.passed })
     $status = if ($failed.Count -eq 0) { 'VERIFIED' } else { 'UNVERIFIED' }
     $payload = [ordered]@{
-        schemaVersion = 1
+        schemaVersion = 2
         generated = (Get-Date -Format o)
         status = $status
         requireDiff = $MustHaveDiff
+        branch = Get-AdosBranch $Root
+        head = Get-AdosHead $Root
+        evidenceFingerprint = Get-AdosEvidenceFingerprint $Root
         evidenceFiles = @($files)
         requirements = @($requirements)
     }
@@ -415,6 +418,147 @@ function Invoke-AdosEvidenceGate {
     return $payload
 }
 
+function ConvertTo-AdosPrTableCell {
+    param($Value)
+    return (([string]$Value) -replace '[\r\n]+', ' ' -replace '\|', '/').Trim()
+}
+
+function Write-AdosPrEvidenceSummary {
+    param([string]$Root, [string]$TaskText)
+
+    $gate = Read-AdosJson (Join-Path $Root '.ai\evidence\evidence-gate.generated.json') $null
+    $scope = Read-AdosJson (Join-Path $Root '.ai\evidence\scope-guard.generated.json') $null
+    $verification = Read-AdosJson (Join-Path $Root '.ai\evidence\verification.generated.json') $null
+    $checkpoint = Read-AdosJson (Join-Path $Root '.ai\checkpoints\current.json') $null
+    $benchmark = Read-AdosJson (Join-Path $Root '.ai\analytics\ab-benchmark.generated.json') $null
+    $elastic = Read-AdosJson (Join-Path $Root '.ai\context\elastic-context.generated.json') $null
+
+    if (-not $TaskText -and $checkpoint -and $checkpoint.task) { $TaskText = [string]$checkpoint.task }
+    $branch = Get-AdosBranch $Root
+    $head = Get-AdosHead $Root
+    $currentFingerprint = Get-AdosEvidenceFingerprint $Root
+    $gateFingerprint = ''
+    if ($gate -and @($gate.PSObject.Properties.Name) -contains 'evidenceFingerprint') {
+        $gateFingerprint = [string]$gate.evidenceFingerprint
+    }
+    $evidenceCurrent = [bool]($gateFingerprint -and $gateFingerprint -eq $currentFingerprint)
+    $gateVerified = [bool]($gate -and [string]$gate.status -eq 'VERIFIED')
+    $status = if ($gateVerified -and $evidenceCurrent) { 'READY' } else { 'NOT_READY' }
+    $reason = if (-not $gate) { 'Evidence Gate has not run.' }
+        elseif (-not $gateVerified) { 'Evidence Gate is not VERIFIED.' }
+        elseif (-not $evidenceCurrent) { 'Repository state changed after Evidence Gate.' }
+        else { 'Evidence Gate is VERIFIED and matches the current repository state.' }
+
+    $files = @(Get-AdosEvidenceFiles $Root)
+    $scopeOutside = @()
+    if ($scope -and $scope.outsideScope) { $scopeOutside = @($scope.outsideScope) }
+    $scopeProtected = @()
+    if ($scope -and $scope.protectedFiles) { $scopeProtected = @($scope.protectedFiles) }
+    $checks = @()
+    if ($verification -and $verification.checks) { $checks = @($verification.checks) }
+    $passedChecks = @($checks | Where-Object { [string]$_.status -eq 'PASS' }).Count
+    $failedChecks = @($checks | Where-Object { [string]$_.status -eq 'FAIL' }).Count
+    $skippedChecks = @($checks | Where-Object { [string]$_.status -eq 'SKIP' }).Count
+    $requirements = @()
+    if ($gate -and $gate.requirements) { $requirements = @($gate.requirements) }
+
+    $benchmarkSummary = $null
+    if ($benchmark) {
+        $benchmarkSummary = [ordered]@{
+            contextByteReductionPercent = $benchmark.contextByteReductionPercent
+            baselineRelevanceDensity = $benchmark.A.relevanceDensity
+            elasticRelevanceDensity = $benchmark.B.relevanceDensity
+        }
+    }
+    $contextSummary = $null
+    if ($elastic) {
+        $contextSummary = [ordered]@{
+            tier = $elastic.tier
+            selectedBytes = $elastic.selectedBytes
+            budgetBytes = $elastic.budgetBytes
+            duplicateBytesAvoided = $(if (@($elastic.PSObject.Properties.Name) -contains 'duplicateBytesAvoided') { $elastic.duplicateBytesAvoided } else { 0 })
+        }
+    }
+
+    $payload = [ordered]@{
+        schemaVersion = 1
+        generated = (Get-Date -Format o)
+        status = $status
+        reason = $reason
+        task = $TaskText
+        branch = $branch
+        head = $head
+        evidenceCurrent = $evidenceCurrent
+        evidenceFingerprint = $gateFingerprint
+        currentFingerprint = $currentFingerprint
+        evidenceGate = $(if ($gate) { [string]$gate.status } else { 'MISSING' })
+        changedFiles = @($files)
+        scope = [ordered]@{
+            status = $(if ($scope) { [string]$scope.status } else { 'MISSING' })
+            outsideScope = @($scopeOutside)
+            protectedFiles = @($scopeProtected)
+        }
+        verification = [ordered]@{
+            status = $(if ($verification) { [string]$verification.status } else { 'MISSING' })
+            maxLevel = $(if ($verification) { $verification.maxLevel } else { 0 })
+            durationMs = $(if ($verification) { $verification.durationMs } else { 0 })
+            passed = $passedChecks
+            failed = $failedChecks
+            skipped = $skippedChecks
+            checks = @($checks)
+        }
+        requirements = @($requirements)
+        benchmark = $benchmarkSummary
+        context = $contextSummary
+        safety = 'Deterministic local summary; no model or paid API was called.'
+    }
+    Write-AdosJson (Join-Path $Root '.ai\evidence\pr-evidence-summary.generated.json') $payload 10
+
+    $shortHead = if ($head.Length -gt 12) { $head.Substring(0, 12) } else { $head }
+    $lines = @(
+        '## ADOS evidence summary','',
+        "**Status:** $status", "**Evidence current:** $evidenceCurrent", "**Evidence Gate:** $($payload.evidenceGate)",
+        "**Branch / HEAD:** ``$branch`` / ``$shortHead``", "**Task:** $(ConvertTo-AdosPrTableCell $TaskText)",'',
+        $reason,'','### Scope','',
+        "- Changed files: $($files.Count)",
+        "- Scope Guard: $($payload.scope.status)",
+        "- Outside allowed scope: $($scopeOutside.Count)",
+        "- Protected files: $($scopeProtected.Count)",'','### Verification','',
+        "- Result: $($payload.verification.status)",
+        "- Maximum level: $($payload.verification.maxLevel)",
+        "- Checks: $passedChecks passed, $failedChecks failed, $skippedChecks skipped",'',
+        '| Level | Check | Result |','|---:|---|---|'
+    )
+    foreach ($check in @($checks | Select-Object -First 50)) {
+        $lines += "| $($check.level) | $(ConvertTo-AdosPrTableCell $check.name) | $(ConvertTo-AdosPrTableCell $check.status) |"
+    }
+    if ($checks.Count -eq 0) { $lines += '| - | No verification checks recorded | MISSING |' }
+    if ($checks.Count -gt 50) { $lines += "| - | $($checks.Count - 50) additional checks omitted | INFO |" }
+    $lines += @('','### Evidence Gate','', '| Requirement | Result | Detail |','|---|---|---|')
+    foreach ($requirement in $requirements) {
+        $result = if ([bool]$requirement.passed) { 'PASS' } else { 'FAIL' }
+        $lines += "| $(ConvertTo-AdosPrTableCell $requirement.name) | $result | $(ConvertTo-AdosPrTableCell $requirement.detail) |"
+    }
+    if ($requirements.Count -eq 0) { $lines += '| Evidence Gate output | FAIL | missing |' }
+    $lines += @('','### Changed files','')
+    $listedFiles = @($files | Select-Object -First 50)
+    $lines += ConvertTo-AdosMarkdownList $listedFiles
+    if ($files.Count -gt 50) { $lines += "- ... $($files.Count - 50) additional files omitted" }
+    if ($benchmarkSummary) {
+        $lines += @('','### Context efficiency','',
+            "- Context byte reduction: $($benchmarkSummary.contextByteReductionPercent)%",
+            "- Relevance density: $($benchmarkSummary.baselineRelevanceDensity) -> $($benchmarkSummary.elasticRelevanceDensity)")
+    }
+    if ($contextSummary) {
+        $lines += "- Duplicate bytes avoided: $($contextSummary.duplicateBytesAvoided)"
+    }
+    $lines += @('','_Generated locally from ADOS evidence artifacts. No model or paid API was called._')
+    Write-AdosUtf8 (Join-Path $Root '.ai\evidence\pr-evidence-summary.generated.md') ($lines -join "`r`n")
+    Add-AdosUsageEvent $Root 'pr-evidence-summary' $status 0 0 0 @{ evidenceCurrent=$evidenceCurrent; files=$files.Count; checks=$checks.Count }
+    Write-Host "PR evidence summary: $status (current: $evidenceCurrent)"
+    return $payload
+}
+
 $root = Resolve-AdosRepoRoot $ProjectPath
 Ensure-AdosLocalExclude $root
 switch ($Command) {
@@ -422,7 +566,11 @@ switch ($Command) {
     'compress' { $null = Invoke-AdosLogCompressor $root $LogPath }
     'scope' { $null = Invoke-AdosScopeGuard $root $Task $AllowedScope }
     'verify' { $null = Invoke-AdosVerification $root $MaxLevel }
-    'evidence' { $null = Invoke-AdosEvidenceGate $root $RequireDiff }
+    'evidence' {
+        $null = Invoke-AdosEvidenceGate $root $RequireDiff
+        $null = Write-AdosPrEvidenceSummary $root $Task
+    }
+    'pr-summary' { $null = Write-AdosPrEvidenceSummary $root $Task }
     'all' {
         if ($LogPath) {
             $compressed = Invoke-AdosLogCompressor $root $LogPath
@@ -431,5 +579,6 @@ switch ($Command) {
         $null = Invoke-AdosScopeGuard $root $Task $AllowedScope
         $null = Invoke-AdosVerification $root $MaxLevel
         $null = Invoke-AdosEvidenceGate $root $RequireDiff
+        $null = Write-AdosPrEvidenceSummary $root $Task
     }
 }

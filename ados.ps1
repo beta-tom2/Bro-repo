@@ -1,7 +1,7 @@
 [CmdletBinding()]
 param(
     [Parameter(Position = 0, Mandatory = $true)]
-    [ValidateSet('doctor','start','analyze','night','handoff','resume','verify','queue','benchmark','stats','failure','remember-regression','remember-negative')]
+    [ValidateSet('doctor','start','analyze','night','handoff','resume','verify','pr-summary','queue','benchmark','stats','failure','remember-regression','remember-negative')]
     [string]$Command,
 
     [string]$ProjectPath = '.',
@@ -227,6 +227,10 @@ switch ($Command) {
     'verify' {
         Ensure-LocalExclude $repo
         & $Quality all -ProjectPath $repo -Task $Task -AllowedScope $AllowedScope -MaxLevel $MaxVerificationLevel -RequireDiff $RequireDiff
+    }
+    'pr-summary' {
+        Ensure-LocalExclude $repo
+        & $Quality pr-summary -ProjectPath $repo -Task $Task
     }
     'queue' {
         Ensure-LocalExclude $repo

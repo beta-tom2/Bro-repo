@@ -100,6 +100,15 @@ Assert-True ($packet -match 'duplicates src\\friends(?:-copy)?\.ts') 'prompt pac
 $sessionContext = Get-Content -LiteralPath (Join-Path $ResolvedFixture '.ai\context\session-context.md') -Raw
 Assert-True ($sessionContext.IndexOf('docs\project-brain\README.md') -lt $sessionContext.IndexOf('README.md when task-relevant')) 'session context must route Project Brain before the optional root README'
 
+$originalDisableRg = $env:ADOS_DISABLE_RG
+$env:ADOS_DISABLE_RG = '1'
+try {
+    & $Ados analyze -ProjectPath $ResolvedFixture -Task 'Find sendFriendRequest without ripgrep' -MaxFiles 100 -MaxCommits 20
+}
+finally { $env:ADOS_DISABLE_RG = $originalDisableRg }
+$fallbackPacket = Get-Content -LiteralPath (Join-Path $ResolvedFixture '.ai\context\prompt-packet.generated.md') -Raw
+Assert-True ($fallbackPacket -match 'src\\friends(?:-copy)?\.ts') 'native PowerShell fallback must find task-relevant files without rg'
+
 & $Operations adapter -ProjectPath $ResolvedFixture
 $adapter = Read-Json '.ai\context\project-adapter.generated.json'
 Assert-True ($adapter.protectedBoundaries -contains 'secrets') 'custom adapters must not remove global protected boundaries'
@@ -133,6 +142,22 @@ Remove-Item -LiteralPath (Join-Path $ResolvedFixture 'src\secret-fixture.ts') -F
 & $Quality verify -ProjectPath $ResolvedFixture -MaxLevel 2
 & $Quality evidence -ProjectPath $ResolvedFixture -RequireDiff $true
 Assert-True ((Read-Json '.ai\evidence\evidence-gate.generated.json').status -eq 'VERIFIED') 'evidence gate must verify an observed in-scope diff'
+$prSummary = Read-Json '.ai\evidence\pr-evidence-summary.generated.json'
+Assert-True ($prSummary.status -eq 'READY') 'fresh verified evidence must produce a ready PR summary'
+Assert-True ($prSummary.evidenceCurrent) 'PR summary must match the current repository state'
+$prMarkdown = Get-Content -LiteralPath (Join-Path $ResolvedFixture '.ai\evidence\pr-evidence-summary.generated.md') -Raw
+Assert-True ($prMarkdown -match 'ADOS evidence summary') 'PR summary must create copy-ready Markdown'
+
+Write-FixtureFile 'src\friends.ts' "export function sendFriendRequest(userId: string): string { return userId.trim().toLowerCase(); }`r`n"
+& $Quality pr-summary -ProjectPath $ResolvedFixture -Task 'Fix sendFriendRequest behavior'
+$staleSummary = Read-Json '.ai\evidence\pr-evidence-summary.generated.json'
+Assert-True ($staleSummary.status -eq 'NOT_READY') 'repository changes after Evidence Gate must invalidate the PR summary'
+Assert-True (-not $staleSummary.evidenceCurrent) 'stale evidence must be reported explicitly'
+Push-Location $ResolvedFixture
+try { & git restore -- src\friends.ts }
+finally { Pop-Location }
+& $Quality pr-summary -ProjectPath $ResolvedFixture -Task 'Fix sendFriendRequest behavior'
+Assert-True ((Read-Json '.ai\evidence\pr-evidence-summary.generated.json').status -eq 'READY') 'restoring the verified repository state must restore summary readiness'
 
 & $Memory regression-add -ProjectPath $ResolvedFixture -Task 'Fix sendFriendRequest behavior' -RegressionCommand 'git diff --check' -Files @('src\friends.ts')
 & $Memory regression-search -ProjectPath $ResolvedFixture -Task 'Fix sendFriendRequest behavior'
