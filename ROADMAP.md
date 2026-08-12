@@ -29,7 +29,7 @@
 ## Next
 
 - [x] bounded compiler-backed reference resolution when a project already provides local TypeScript;
-- [ ] optional Windows Task Scheduler installation for Night Mode, requiring explicit user authorization;
+- [x] optional, preview-first Windows Task Scheduler management for Night Mode with explicit install and uninstall confirmation;
 - [x] project-owned health thresholds and bounded local trend baselines;
 - [x] richer test-to-symbol association for monorepos with bounded focused-test execution;
 - [x] PR evidence summary generated from the local Evidence Gate artifacts, with repository-state freshness validation.

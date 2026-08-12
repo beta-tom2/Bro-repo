@@ -1,7 +1,7 @@
 [CmdletBinding()]
 param(
     [Parameter(Position = 0, Mandatory = $true)]
-    [ValidateSet('doctor','start','analyze','night','health','handoff','resume','verify','pr-summary','queue','benchmark','stats','failure','remember-regression','remember-negative')]
+    [ValidateSet('doctor','start','analyze','night','scheduler','health','handoff','resume','verify','pr-summary','queue','benchmark','stats','failure','remember-regression','remember-negative')]
     [string]$Command,
 
     [string]$ProjectPath = '.',
@@ -30,6 +30,14 @@ param(
     [string]$Attempt = '',
     [string]$Outcome = '',
     [bool]$EvidenceChanged = $false,
+    [ValidateSet('preview','install','status','uninstall')]
+    [string]$SchedulerAction = 'preview',
+    [ValidatePattern('^([01][0-9]|2[0-3]):[0-5][0-9]$')]
+    [string]$DailyAt = '03:00',
+    [string]$SchedulerTaskName = '',
+    [switch]$ConfirmSchedulerInstall,
+    [switch]$ReplaceScheduledTask,
+    [switch]$ConfirmSchedulerUninstall,
     [ValidateRange(2,365)]
     [int]$HealthHistoryLimit = 90
 )
@@ -45,6 +53,7 @@ $Quality = Join-Path $Root 'scripts\ados-quality.ps1'
 $MemoryV3 = Join-Path $Root 'scripts\ados-memory-v3.ps1'
 $Operations = Join-Path $Root 'scripts\ados-operations.ps1'
 $Health = Join-Path $Root 'scripts\ados-health.ps1'
+$Scheduler = Join-Path $Root 'scripts\ados-scheduler.ps1'
 
 function Require-File {
     param([string]$Path)
@@ -121,6 +130,7 @@ function Invoke-Doctor {
     Require-File $MemoryV3
     Require-File $Operations
     Require-File $Health
+    Require-File $Scheduler
     & $DevCore doctor
     Write-Host ''
     Write-Host 'ADOS components:'
@@ -132,6 +142,7 @@ function Invoke-Doctor {
     Write-Host ('{0,-28} PASS' -f 'quality and evidence gates')
     Write-Host ('{0,-28} PASS' -f 'v3 memory and operations')
     Write-Host ('{0,-28} PASS' -f 'project health and trends')
+    Write-Host ('{0,-28} PASS' -f 'safe Night Mode scheduler')
 }
 
 function Get-ElasticBudget {
@@ -220,6 +231,10 @@ switch ($Command) {
         & $Insights heatmap -ProjectPath $repo -MaxCommits $MaxCommits
         & $Insights graph -ProjectPath $repo -MaxFiles $MaxFiles
         & $Operations night -ProjectPath $repo -MaxFiles $MaxFiles -HealthHistoryLimit $HealthHistoryLimit
+    }
+    'scheduler' {
+        Ensure-LocalExclude $repo
+        & $Scheduler $SchedulerAction -ProjectPath $repo -DailyAt $DailyAt -MaxFiles $MaxFiles -HealthHistoryLimit $HealthHistoryLimit -TaskName $SchedulerTaskName -ConfirmInstall:$ConfirmSchedulerInstall -ReplaceExisting:$ReplaceScheduledTask -ConfirmUninstall:$ConfirmSchedulerUninstall
     }
     'health' {
         Ensure-LocalExclude $repo
