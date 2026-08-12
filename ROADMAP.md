@@ -24,6 +24,7 @@
 - [x] Checkpoint/Resume, Queue Engine, and read-only Night Mode;
 - [x] local usage analytics and deterministic A/B benchmark;
 - [x] PowerShell 5.1 integration smoke test.
+- [x] Windows PowerShell 5.1 CI for parser, smoke, and clean-worktree verification.
 
 ## Next
 
@@ -31,6 +32,6 @@
 - [ ] optional Windows Task Scheduler installation for Night Mode, requiring explicit user authorization;
 - [ ] project-owned health thresholds and trend baselines;
 - [ ] richer test-to-symbol association for monorepos;
-- [ ] PR evidence summary generated from the local Evidence Gate artifacts.
+- [x] PR evidence summary generated from the local Evidence Gate artifacts, with repository-state freshness validation.
 
 No roadmap item may require a paid third-party AI API. Ollama remains read-only, and protected work continues to require Codex-level review.

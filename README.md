@@ -57,6 +57,9 @@ ADOS orchestrates DevCore, incremental indexes, project memory, verification evi
   -AllowedScope @("src\friends", "tests\friends") `
   -MaxVerificationLevel 3
 
+.\ados.ps1 pr-summary `
+  -ProjectPath "C:\path\to\repo"
+
 .\ados.ps1 queue `
   -ProjectPath "C:\path\to\repo" `
   -QueueAction add `
@@ -89,7 +92,7 @@ ADOS orchestrates DevCore, incremental indexes, project memory, verification evi
   -Files @("src\friends.ts")
 ```
 
-`start` saves a pre-change checkpoint, detects the project adapter, refreshes local memory, builds symbol-aware elastic context, and creates the prompt packet and handoff. `verify` runs Scope Guard, the bounded Verification Ladder, and Evidence Gate. A task is reported as `VERIFIED` only when required evidence was actually observed.
+`start` saves a pre-change checkpoint, detects the project adapter, refreshes local memory, builds symbol-aware elastic context, and creates the prompt packet and handoff. `verify` runs Scope Guard, the bounded Verification Ladder, and Evidence Gate, then writes a bounded PR evidence summary. `pr-summary` regenerates that summary without rerunning checks and marks it `NOT_READY` if the repository changed after Evidence Gate. A task is reported as `VERIFIED` only when required evidence was actually observed.
 
 ## ADOS modules
 
@@ -112,6 +115,7 @@ ADOS orchestrates DevCore, incremental indexes, project memory, verification evi
 - Scope Guard: compares post-checkpoint changes with explicit allowed scope and protected paths.
 - Verification Ladder: stops at the requested level and records each observed check.
 - Evidence Gate: refuses a verified status when diff, checks, scope evidence, or secret scanning is missing.
+- PR Evidence Summary: creates a copy-ready local Markdown report and rejects stale Evidence Gate artifacts using a repository-state fingerprint.
 - Project Adapters: detects ATLAS, NAVIRA, BPMN Studio, and generic web/mobile boundaries, supplies repository entrypoints, and never rewrites project settings.
 - Checkpoint and Resume: records task, branch, HEAD, baseline changes, and continuation phase.
 - Queue Engine: maintains a local priority queue; queue inspection never executes a task by itself.
@@ -155,3 +159,5 @@ Run the deterministic integration fixture under Windows PowerShell 5.1:
 ```
 
 The test creates an isolated Git fixture under `tests/.work/`, exercises the complete v0.3 pipeline, and expects `ADOS v0.3 smoke test: PASS`.
+
+Pull requests that touch ADOS code run the same parser and smoke checks on a standard Windows runner using Windows PowerShell 5.1. The workflow is deterministic, read-only outside its disposable fixture, and does not call a model or paid API.

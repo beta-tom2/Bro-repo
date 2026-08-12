@@ -109,6 +109,35 @@ function Get-AdosTaskId {
     return $hash.Substring(0, 16)
 }
 
+function Get-AdosEvidenceFingerprint {
+    param([string]$Root)
+
+    Push-Location $Root
+    try {
+        $parts = @(
+            'HEAD=' + (Get-AdosHead $Root),
+            'BRANCH=' + (Get-AdosBranch $Root)
+        )
+        $changed = @(Get-AdosChangedFiles $Root | Sort-Object)
+        foreach ($relative in $changed) {
+            $candidate = Join-Path $Root ([string]$relative)
+            $gitPath = ([string]$relative).Replace('\', '/')
+            $indexState = (& git ls-files -s -- $gitPath 2>$null | Out-String).Trim()
+            $worktreeState = 'missing'
+            if (Test-Path -LiteralPath $candidate -PathType Leaf) {
+                try { $worktreeState = (Get-FileHash -LiteralPath $candidate -Algorithm SHA256).Hash.ToLowerInvariant() }
+                catch {
+                    $item = Get-Item -LiteralPath $candidate
+                    $worktreeState = 'unreadable:' + [string]$item.Length
+                }
+            }
+            $parts += ([string]$relative).Replace('/', '\') + '|index=' + $indexState + '|worktree=' + $worktreeState
+        }
+        return Get-AdosTextHash ($parts -join "`n")
+    }
+    finally { Pop-Location }
+}
+
 function Get-AdosHead {
     param([string]$Root)
     Push-Location $Root

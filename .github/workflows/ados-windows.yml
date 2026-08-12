@@ -1,0 +1,68 @@
+name: ADOS Windows PowerShell 5.1
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - ".github/workflows/ados-windows.yml"
+      - "*.ps1"
+      - "scripts/**"
+      - "tests/**"
+      - "template/**"
+  push:
+    branches: [main]
+    paths:
+      - ".github/workflows/ados-windows.yml"
+      - "*.ps1"
+      - "scripts/**"
+      - "tests/**"
+      - "template/**"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ados-windows-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  powershell-51:
+    runs-on: windows-latest
+    timeout-minutes: 15
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Parse PowerShell files
+        shell: powershell
+        run: |
+          $failed = $false
+          foreach ($file in @(git ls-files "*.ps1")) {
+            $tokens = $null
+            $parseErrors = $null
+            [System.Management.Automation.Language.Parser]::ParseFile(
+              (Join-Path $PWD $file),
+              [ref]$tokens,
+              [ref]$parseErrors
+            ) | Out-Null
+            if (@($parseErrors).Count -gt 0) {
+              $failed = $true
+              Write-Error "$file`: $((@($parseErrors | ForEach-Object { $_.Message })) -join '; ')"
+            }
+          }
+          if ($failed) { throw 'PowerShell parser errors detected.' }
+
+      - name: Run ADOS smoke test
+        shell: powershell
+        run: .\tests\ados-smoke.ps1
+
+      - name: Confirm clean worktree
+        shell: powershell
+        run: |
+          git diff --check
+          $status = @(git status --porcelain=v1)
+          if ($status.Count -gt 0) {
+            $status | ForEach-Object { Write-Error $_ }
+            throw 'Smoke test changed tracked repository files.'
+          }

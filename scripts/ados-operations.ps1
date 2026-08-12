@@ -150,6 +150,7 @@ function Save-AdosCheckpoint {
             elasticContext = '.ai\context\elastic-context.generated.md'
             handoff = '.ai\context\handoff.generated.md'
             evidence = '.ai\evidence\evidence-gate.generated.md'
+            prEvidenceSummary = '.ai\evidence\pr-evidence-summary.generated.md'
         }
     }
     $path = Join-Path $Root '.ai\checkpoints\current.json'
