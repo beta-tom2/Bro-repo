@@ -19,6 +19,7 @@ Pause only for:
 
 ## Albert Dev Skills
 - Before medium, complex, unfamiliar, risky, design, architecture, debugging, database, release, review, or skill-discovery work, apply the `albert-skill-router` policy when available.
+- For meaningful application or website UI/UX/frontend/motion work, let `albert-skill-router` delegate to `albert-design-director`; do not manually stack all design skills.
 - Skills are selective capabilities, not a mandatory stack. Start with zero optional skills and load only the smallest set with a positive expected benefit.
 - Installed does not mean always invoked.
 - Explicit user instructions, this repository's rules, nearest scoped `AGENTS.md`, and DevCore/ADOS protected-domain rules override third-party skill guidance.
