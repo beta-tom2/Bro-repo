@@ -104,7 +104,7 @@ If exact motion is already specified, use `animate` -> `review-animations`.
 ### Broad architecture review
 `albert-architecture-review` coordinates the architecture suite. Do not trigger it for a local rename or tiny refactor.
 
-## Install
+## Install global skills
 
 Preview first:
 
@@ -118,17 +118,36 @@ Install approved skills globally:
 .\scripts\install-albert-dev-skills.ps1 -Global
 ```
 
-Install and copy Albert routers into a project:
+Global installation makes external skills available to compatible local agent environments.
+
+## One-command project adoption
+
+Use the wrapper below for current and future repositories:
 
 ```powershell
-.\scripts\install-albert-dev-skills.ps1 -ProjectPath "C:\path\to\repo"
+.\scripts\adopt-albert-project.ps1 -ProjectPath "C:\path\to\repo"
 ```
 
-Global installation makes external skills available to compatible local agent environments. Project installation also places Albert routers under `.agents/skills/`.
+The wrapper deliberately preserves existing project files and then performs the Albert adoption sequence:
+
+1. runs DevCore `adopt` to install/preserve `AGENTS.md`, Project Brain context templates, local model policy, registration, repository maps and focused test context;
+2. copies the three Albert routing skills locally under `.agents/skills/`: `albert-skill-router`, `albert-architecture-review`, and `albert-design-director`;
+3. prepares local `.ai/analytics/` storage for Skill Telemetry and excludes it from Git commits;
+4. refreshes generated DevCore context after all routing files are present.
+
+Third-party skills remain global rather than being copied into every repository. This keeps project repositories small while making the Albert routing layer project-local and deterministic.
+
+If the repository already has stricter `AGENTS.md` or context files, they are preserved rather than overwritten.
 
 ## New project adoption
 
-When DevCore adopts a new repository, the project inherits Skill Routing guidance from `template/AGENTS.md`. Meaningful UI/UX/frontend/motion work should route through `albert-design-director`; backend-only and tiny visual work should not pay design-skill overhead.
+For a new repository, the expected default is now one command:
+
+```powershell
+.\scripts\adopt-albert-project.ps1 -ProjectPath "C:\path\to\new-repo"
+```
+
+This removes the need to remember separate DevCore, Project Brain, Skill Router, Design Director and telemetry setup steps. Meaningful UI/UX/frontend/motion work routes through `albert-design-director`; backend-only and tiny visual work should not pay design-skill overhead.
 
 ## ChatGPT / Work
 
