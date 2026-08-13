@@ -1,0 +1,77 @@
+[CmdletBinding()]
+param(
+    [Parameter(Mandatory = $true)]
+    [string]$ProjectPath
+)
+
+$ErrorActionPreference = 'Stop'
+$DevCoreRoot = Split-Path -Parent $PSScriptRoot
+$DevCoreEntry = Join-Path $DevCoreRoot 'devcore.ps1'
+
+if (-not (Test-Path -LiteralPath $DevCoreEntry)) {
+    throw "DevCore entrypoint not found: $DevCoreEntry"
+}
+
+$resolvedProject = (Resolve-Path -LiteralPath $ProjectPath).Path
+Push-Location $resolvedProject
+try {
+    $repoRoot = (& git rev-parse --show-toplevel 2>$null | Out-String).Trim()
+    if (-not $repoRoot) { throw "Not a Git repository: $resolvedProject" }
+    $repoRoot = [IO.Path]::GetFullPath($repoRoot).TrimEnd('\','/')
+
+    $statusBefore = (& git status --short | Out-String).TrimEnd()
+    if ($statusBefore) {
+        Write-Warning 'Project has pre-existing working-tree changes. Adoption will preserve existing files and add only missing Albert files.'
+    }
+
+    Write-Host "[1/4] DevCore adopt: $repoRoot"
+    & $DevCoreEntry adopt -ProjectPath $repoRoot
+    if ($LASTEXITCODE -ne 0) { throw "DevCore adopt failed with exit code $LASTEXITCODE" }
+
+    Write-Host '[2/4] Installing Albert project router skills'
+    $localSkills = @(
+        'albert-skill-router',
+        'albert-architecture-review',
+        'albert-design-director'
+    )
+    foreach ($skill in $localSkills) {
+        $source = Join-Path $DevCoreRoot ("skills\" + $skill)
+        $target = Join-Path $repoRoot (".agents\skills\" + $skill)
+        if (-not (Test-Path -LiteralPath $source)) { throw "Albert skill source missing: $source" }
+        New-Item -ItemType Directory -Force -Path $target | Out-Null
+        Copy-Item -LiteralPath (Join-Path $source 'SKILL.md') -Destination (Join-Path $target 'SKILL.md') -Force
+        Write-Host "  installed: $skill"
+    }
+
+    Write-Host '[3/4] Preparing local Skill Telemetry location'
+    $analytics = Join-Path $repoRoot '.ai\analytics'
+    New-Item -ItemType Directory -Force -Path $analytics | Out-Null
+
+    Push-Location $repoRoot
+    try {
+        $exclude = (& git rev-parse --git-path info/exclude 2>$null | Out-String).Trim()
+        if (-not [IO.Path]::IsPathRooted($exclude)) { $exclude = Join-Path $repoRoot $exclude }
+        $exclude = [IO.Path]::GetFullPath($exclude)
+        $rule = '.ai/analytics/'
+        $existing = if (Test-Path -LiteralPath $exclude) { @(Get-Content -LiteralPath $exclude) } else { @() }
+        if ($existing -notcontains $rule) { Add-Content -LiteralPath $exclude -Value $rule -Encoding UTF8 }
+    }
+    finally { Pop-Location }
+
+    Write-Host '[4/4] Refreshing generated DevCore context'
+    & $DevCoreEntry update -ProjectPath $repoRoot
+    if ($LASTEXITCODE -ne 0) { throw "DevCore update failed with exit code $LASTEXITCODE" }
+
+    $head = (& git -C $repoRoot rev-parse HEAD | Out-String).Trim()
+    $branch = (& git -C $repoRoot branch --show-current | Out-String).Trim()
+    Write-Host ''
+    Write-Host 'Albert project adoption complete.'
+    Write-Host "Repository: $repoRoot"
+    Write-Host "Branch:     $branch"
+    Write-Host "HEAD:       $head"
+    Write-Host 'Added/preserved: AGENTS.md, Project Brain context, Albert routers, local telemetry path, DevCore registration/context.'
+    Write-Host 'Third-party development skills remain global and selectively routed; they are not copied into every repository.'
+}
+finally {
+    Pop-Location
+}
