@@ -1,7 +1,7 @@
 [CmdletBinding()]
 param(
     [Parameter(Position = 0, Mandatory = $true)]
-    [ValidateSet('doctor','adopt','update','route','local','review','packet','register','projects')]
+    [ValidateSet('doctor','adopt','update','route','local','review','packet','register','projects','registry-repair')]
     [string]$Command,
     [string]$ProjectPath = '.',
     [string]$Task = '',
@@ -26,6 +26,134 @@ function Write-Utf8NoBom {
     param([string]$Path,[string]$Content)
     Ensure-Directory (Split-Path -Parent $Path)
     [IO.File]::WriteAllText($Path,$Content,(New-Object Text.UTF8Encoding($false)))
+}
+
+function Read-RegistryState {
+    $entries = New-Object 'System.Collections.Generic.List[object]'
+    $warnings = New-Object 'System.Collections.Generic.List[string]'
+    $seenPaths = @{}
+    $state = [pscustomobject]@{ needsRepair=$false; invalidCount=0 }
+
+    if (-not (Test-Path -LiteralPath $RegistryPath -PathType Leaf)) {
+        return [pscustomobject]@{ exists=$false; entries=$entries.ToArray(); needsRepair=$false; warnings=$warnings.ToArray() }
+    }
+
+    $content = Get-Content -LiteralPath $RegistryPath -Raw
+    if ([string]::IsNullOrWhiteSpace($content)) {
+        $warnings.Add('Registry is empty; no valid project entries were loaded.')
+        return [pscustomobject]@{ exists=$true; entries=$entries.ToArray(); needsRepair=$true; warnings=$warnings.ToArray() }
+    }
+
+    try { $root = $content | ConvertFrom-Json }
+    catch {
+        $warnings.Add("Registry JSON is invalid: $($_.Exception.Message)")
+        return [pscustomobject]@{ exists=$true; entries=$entries.ToArray(); needsRepair=$true; warnings=$warnings.ToArray() }
+    }
+
+    $trimmed = $content.Trim()
+    if (-not ($trimmed.StartsWith('[') -and $trimmed.EndsWith(']'))) { $state.needsRepair = $true }
+
+    function Add-RegistryNode([object]$Node,[bool]$IsRoot=$false) {
+        if ($null -eq $Node) {
+            $state.needsRepair = $true
+            $state.invalidCount++
+            $warnings.Add('Ignoring null registry element.')
+            return
+        }
+        if ($Node -is [System.Array]) {
+            if (-not $IsRoot) { $state.needsRepair = $true }
+            foreach ($child in $Node) { Add-RegistryNode $child $false }
+            return
+        }
+
+        $properties = @($Node.PSObject.Properties.Name)
+        $hasRequiredProperties = ($properties -contains 'name') -and ($properties -contains 'path') -and ($properties -contains 'registered')
+        $hasRequiredValues = $hasRequiredProperties -and
+            -not [string]::IsNullOrWhiteSpace([string]$Node.name) -and
+            -not [string]::IsNullOrWhiteSpace([string]$Node.path) -and
+            -not [string]::IsNullOrWhiteSpace([string]$Node.registered)
+
+        if ($hasRequiredValues) {
+            if ($properties.Count -ne 3) { $state.needsRepair = $true }
+            $key = ([string]$Node.path).Trim().ToLowerInvariant()
+            if ($seenPaths.ContainsKey($key)) {
+                $state.needsRepair = $true
+                $warnings.Add("Ignoring duplicate registry path: $($Node.path)")
+                return
+            }
+            $seenPaths[$key] = $true
+            $entries.Add([pscustomobject][ordered]@{
+                name=[string]$Node.name
+                path=[string]$Node.path
+                registered=[string]$Node.registered
+            })
+            return
+        }
+
+        if ($properties -contains 'value') {
+            $state.needsRepair = $true
+            Add-RegistryNode $Node.value $false
+            return
+        }
+
+        $state.needsRepair = $true
+        $state.invalidCount++
+        $warnings.Add("Ignoring invalid registry element with properties: $($properties -join ', ')")
+    }
+
+    Add-RegistryNode $root $true
+    return [pscustomobject]@{
+        exists=$true
+        entries=$entries.ToArray()
+        needsRepair=[bool]$state.needsRepair
+        warnings=$warnings.ToArray()
+    }
+}
+
+function Write-RegistryWarnings {
+    param([object]$State)
+    foreach ($message in @($State.warnings | ForEach-Object { $_ })) { Write-Warning $message }
+}
+
+function Backup-RegistryFile {
+    if (-not (Test-Path -LiteralPath $RegistryPath -PathType Leaf)) { return $null }
+    $directory = Split-Path -Parent $RegistryPath
+    $stamp = Get-Date -Format 'yyyyMMdd-HHmmss-fff'
+    $backup = Join-Path $directory "projects.backup-$stamp.json"
+    $suffix = 0
+    while (Test-Path -LiteralPath $backup) {
+        $suffix++
+        $backup = Join-Path $directory "projects.backup-$stamp-$suffix.json"
+    }
+    Copy-Item -LiteralPath $RegistryPath -Destination $backup
+    Write-Host "Registry backup: $backup"
+    return $backup
+}
+
+function Write-NormalizedRegistry {
+    param([object[]]$Entries,[switch]$CreateBackup)
+    Ensure-Directory (Split-Path -Parent $RegistryPath)
+    if ($CreateBackup -and (Test-Path -LiteralPath $RegistryPath -PathType Leaf)) {
+        $null = Backup-RegistryFile
+    }
+    $flatEntries = @($Entries | ForEach-Object { $_ })
+    $json = if ($flatEntries.Count -eq 0) { '[]' } else { ConvertTo-Json -InputObject $flatEntries -Depth 4 }
+    Write-Utf8NoBom $RegistryPath ($json + [Environment]::NewLine)
+}
+
+function Invoke-RegistryRepair {
+    $state = Read-RegistryState
+    Write-RegistryWarnings $state
+    if (-not $state.exists) {
+        Write-Host 'Registry not found; nothing to repair.'
+        return
+    }
+    if (-not $state.needsRepair) {
+        Write-Host "Registry already normalized: $(@($state.entries).Count) project(s)."
+        return
+    }
+    Write-NormalizedRegistry -Entries $state.entries -CreateBackup
+    Write-Host "Registry repaired: $(@($state.entries).Count) valid project(s)."
 }
 
 function Resolve-RepositoryRoot {
@@ -403,20 +531,20 @@ function Invoke-Packet {
 function Invoke-Register {
     param([string]$Path)
     $root = Resolve-RepositoryRoot $Path
-    Ensure-Directory (Split-Path -Parent $RegistryPath)
-    $entries = @()
-    if (Test-Path $RegistryPath) { try { $entries = @(Get-Content $RegistryPath -Raw | ConvertFrom-Json) } catch { $entries = @() } }
+    $state = Read-RegistryState
+    Write-RegistryWarnings $state
     $name = Split-Path $root -Leaf
-    $entries = @($entries | Where-Object { $_.path -ne $root })
+    $entries = @($state.entries | Where-Object { $_.path -ne $root })
     $entries += [pscustomobject]@{ name=$name; path=$root; registered=(Get-Date -Format o) }
-    Write-Utf8NoBom $RegistryPath ($entries | ConvertTo-Json -Depth 4)
+    Write-NormalizedRegistry -Entries $entries -CreateBackup:$state.needsRepair
     Write-Host "Registered: $name"
 }
 
 function Invoke-Projects {
-    if (-not (Test-Path $RegistryPath)) { Write-Host 'No projects registered.'; return }
-    $entries = @(Get-Content $RegistryPath -Raw | ConvertFrom-Json)
-    foreach ($entry in $entries) { Write-Host ('{0,-28} {1}' -f $entry.name,$entry.path) }
+    $state = Read-RegistryState
+    Write-RegistryWarnings $state
+    if (-not $state.exists -or @($state.entries).Count -eq 0) { Write-Host 'No valid projects registered.'; return }
+    foreach ($entry in @($state.entries | ForEach-Object { $_ })) { Write-Host ('{0,-28} {1}' -f $entry.name,$entry.path) }
 }
 
 function Invoke-Adopt {
@@ -462,4 +590,5 @@ switch ($Command) {
     'packet'   { Invoke-Packet $ProjectPath $Task $ContextBudgetBytes }
     'register' { Invoke-Register $ProjectPath }
     'projects' { Invoke-Projects }
+    'registry-repair' { Invoke-RegistryRepair }
 }

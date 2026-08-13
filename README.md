@@ -20,6 +20,7 @@ Free local development infrastructure for ATLAS, NAVIRA, and future projects.
 .\devcore.ps1 adopt -ProjectPath "C:\path\to\repo"
 .\devcore.ps1 register -ProjectPath "C:\path\to\repo"
 .\devcore.ps1 projects
+.\devcore.ps1 registry-repair
 .\devcore.ps1 update -ProjectPath "C:\path\to\repo"
 .\devcore.ps1 route -Task "Review README wording"
 .\devcore.ps1 packet -ProjectPath "C:\path\to\repo" -Task "Fix a friends bug"

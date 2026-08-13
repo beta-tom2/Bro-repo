@@ -24,11 +24,15 @@ try {
         Write-Warning 'Project has pre-existing working-tree changes. Adoption will preserve existing files and add only missing Albert files.'
     }
 
-    Write-Host "[1/4] DevCore adopt: $repoRoot"
+    Write-Host '[1/5] Checking and normalizing DevCore registry'
+    & $DevCoreEntry registry-repair
+    if ($LASTEXITCODE -ne 0) { throw "DevCore registry repair failed with exit code $LASTEXITCODE" }
+
+    Write-Host "[2/5] DevCore adopt: $repoRoot"
     & $DevCoreEntry adopt -ProjectPath $repoRoot
     if ($LASTEXITCODE -ne 0) { throw "DevCore adopt failed with exit code $LASTEXITCODE" }
 
-    Write-Host '[2/4] Installing Albert project router skills'
+    Write-Host '[3/5] Installing Albert project router skills'
     $localSkills = @(
         'albert-skill-router',
         'albert-architecture-review',
@@ -43,7 +47,7 @@ try {
         Write-Host "  installed: $skill"
     }
 
-    Write-Host '[3/4] Preparing local Skill Telemetry location'
+    Write-Host '[4/5] Preparing local Skill Telemetry location'
     $analytics = Join-Path $repoRoot '.ai\analytics'
     New-Item -ItemType Directory -Force -Path $analytics | Out-Null
 
@@ -58,7 +62,7 @@ try {
     }
     finally { Pop-Location }
 
-    Write-Host '[4/4] Refreshing generated DevCore context'
+    Write-Host '[5/5] Refreshing generated DevCore context'
     & $DevCoreEntry update -ProjectPath $repoRoot
     if ($LASTEXITCODE -ne 0) { throw "DevCore update failed with exit code $LASTEXITCODE" }
 
