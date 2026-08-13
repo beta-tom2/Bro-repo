@@ -43,4 +43,4 @@ No roadmap item may require a paid third-party AI API. Ollama remains read-only,
 - [x] automatic bounded read-only Ollama first pass for local-safe tasks;
 - [x] generated Codex handoff with exact completion and release commands;
 - [x] Draft-PR-only background-agent contract with protected-domain stops;
-- [ ] activate and observe ChatGPT Scheduled Tasks for NAVIRA and ATLAS after v0.4 merges.
+- [x] activate and observe ChatGPT Scheduled Tasks for NAVIRA and ATLAS after v0.4 merges.
