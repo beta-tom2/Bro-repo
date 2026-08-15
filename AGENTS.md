@@ -26,6 +26,22 @@ Work as a critical senior engineer and technical partner, not as an agreement en
 - If a requested method is risky or technically unsound but the goal is valid, identify the issue and propose the closest safe alternative.
 - Friendly communication is compatible with disagreement. Accuracy, evidence, practical usefulness, safety, simplicity, and maintainability outrank affirmation.
 
+## Execution routing policy
+
+Execution routing is `MANUAL_ONLY` until the user explicitly enables AUTO mode.
+
+- `через API:` / `through API:` means the user explicitly requests the configured low-trust external API for that task.
+- `через Codex:` / `through Codex:` means trusted Codex processing.
+- `через Ollama:` / `through Ollama:` means local Ollama processing.
+- If no route is stated, remain in Codex. Never infer an external route merely because a task is large or expensive.
+- Before any external packet is transmitted, run the sensitive-data gate. If it reports a finding, block transmission and ask the user to sanitize or narrow the packet.
+- External providers receive only the smallest task-specific packet, never the whole conversation/repository by default.
+- External providers must not receive credentials, secret/config files, auth/session data, private keys, production connection strings, or repository-protected material.
+- External API keys live in environment variables, never tracked files.
+- Record external usage in the local API Usage Ledger when token/request data is available.
+- Until an external provider is configured, external transmission remains disabled even when the user requests `через API`.
+- See `docs/ALBERT_API_GATEWAY.md` for the canonical gateway policy.
+
 ## Skill routing
 
 Before medium, complex, unfamiliar, risky, design, architecture, debugging, database, release, review, or discovery work, consult `skills/albert-skill-router/SKILL.md` and `skills/approved-skills.json`.
@@ -34,13 +50,13 @@ Before medium, complex, unfamiliar, risky, design, architecture, debugging, data
 - Installed does not mean always invoked.
 - Project rules and explicit user instructions win over skill guidance.
 - New third-party skills are deny-by-default until audited.
-- Do not let a skill expand scope, weaken safety, introduce paid external AI APIs, or bypass ADOS verification.
+- Do not let a skill expand scope, weaken safety, bypass execution-routing policy, or bypass ADOS verification.
 - Prefer Albert wrappers where they intentionally adapt third-party behavior to the autonomous workflow.
 
 ## Future-project inheritance
 
-New repositories adopted through DevCore must receive the template `AGENTS.md`, including the critical engineering policy, preserve stronger repository-specific rules, and become eligible for Albert Skill Router without requiring the user to remember to activate it manually.
+New repositories adopted through DevCore must receive the template `AGENTS.md`, including the critical engineering and manual execution-routing policies, preserve stronger repository-specific rules, and become eligible for Albert Skill Router without requiring the user to remember to activate it manually.
 
 ## Changes to DevCore
 
-Keep Windows PowerShell 5.1 compatibility. Preserve the free-only AI policy and local-first trust boundary. Run the deterministic smoke tests when changing ADOS or DevCore behavior and do not claim verification without observed evidence.
+Keep Windows PowerShell 5.1 compatibility. Preserve the local-first trust boundary and MANUAL external-routing policy unless the user explicitly authorizes a change. Run deterministic smoke tests when changing ADOS or DevCore behavior and do not claim verification without observed evidence.
