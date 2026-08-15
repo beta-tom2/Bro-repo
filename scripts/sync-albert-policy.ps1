@@ -12,21 +12,14 @@ $RegistryBase = $env:USERPROFILE
 if (-not $RegistryBase) { $RegistryBase = $HOME }
 if (-not $RegistryBase) { $RegistryBase = $DevCoreRoot }
 $RegistryPath = Join-Path $RegistryBase '.albert-devcore\projects.json'
-$StartMarker = '<!-- ALBERT-CRITICAL-ENGINEERING-POLICY:START -->'
-$EndMarker = '<!-- ALBERT-CRITICAL-ENGINEERING-POLICY:END -->'
 
-function Read-Utf8([string]$Path) {
-    return [IO.File]::ReadAllText($Path)
-}
+function Read-Utf8([string]$Path) { return [IO.File]::ReadAllText($Path) }
+function Write-Utf8NoBom([string]$Path,[string]$Content) { [IO.File]::WriteAllText($Path,$Content,(New-Object Text.UTF8Encoding($false))) }
 
-function Write-Utf8NoBom([string]$Path,[string]$Content) {
-    [IO.File]::WriteAllText($Path,$Content,(New-Object Text.UTF8Encoding($false)))
-}
-
-function Get-CanonicalPolicy {
+function Get-CanonicalSection([string]$Heading,[string]$StartMarker,[string]$EndMarker) {
     $template = Read-Utf8 $TemplatePath
-    $start = $template.IndexOf('## Critical engineering policy')
-    if ($start -lt 0) { throw 'Critical engineering policy section not found in template/AGENTS.md' }
+    $start = $template.IndexOf("## $Heading")
+    if ($start -lt 0) { throw "$Heading section not found in template/AGENTS.md" }
     $next = $template.IndexOf("`n## ", $start + 4)
     if ($next -lt 0) { $section = $template.Substring($start).Trim() }
     else { $section = $template.Substring($start, $next - $start).Trim() }
@@ -47,9 +40,7 @@ function Normalize-RegistryEntries($Value) {
             }
             return
         }
-        if ($Node.PSObject) {
-            foreach ($p in $Node.PSObject.Properties) { Walk $p.Value }
-        }
+        if ($Node.PSObject) { foreach ($p in $Node.PSObject.Properties) { Walk $p.Value } }
     }
     Walk $Value
     return @($result | Group-Object path | ForEach-Object { $_.Group[0] })
@@ -77,34 +68,40 @@ function Get-Targets {
     return @($targets)
 }
 
-function Sync-Policy([string]$Root,[string]$Policy) {
-    $agents = Join-Path $Root 'AGENTS.md'
-    if (-not (Test-Path -LiteralPath $agents)) {
+function Sync-ManagedSection([string]$Agents,[string]$Heading,[string]$StartMarker,[string]$EndMarker,[string]$Policy) {
+    if (-not (Test-Path -LiteralPath $Agents)) {
         $content = "# Project agent rules`r`n`r`n$Policy`r`n"
-        if ($DryRun) { Write-Host "[DRY RUN] create $agents" }
-        else { Write-Utf8NoBom $agents $content; Write-Host "Created: $agents" }
+        if ($DryRun) { Write-Host "[DRY RUN] create $Agents with $Heading" }
+        else { Write-Utf8NoBom $Agents $content; Write-Host "Created: $Agents ($Heading)" }
         return
     }
-    $text = Read-Utf8 $agents
+    $text = Read-Utf8 $Agents
     $s = $text.IndexOf($StartMarker)
     $e = $text.IndexOf($EndMarker)
     if ($s -ge 0 -and $e -gt $s) {
         $e += $EndMarker.Length
         $updated = $text.Substring(0,$s).TrimEnd() + "`r`n`r`n" + $Policy + "`r`n" + $text.Substring($e).TrimStart()
-        if ($DryRun) { Write-Host "[DRY RUN] update managed policy in $agents" }
-        else { Write-Utf8NoBom $agents $updated; Write-Host "Updated managed policy: $agents" }
+        if ($DryRun) { Write-Host "[DRY RUN] update managed $Heading in $Agents" }
+        else { Write-Utf8NoBom $Agents $updated; Write-Host "Updated managed $Heading: $Agents" }
         return
     }
-    if ($text -match '(?m)^## Critical engineering policy\s*$') {
-        Write-Warning "Unmanaged Critical engineering policy already exists; preserving project copy: $agents"
+    $escaped=[regex]::Escape("## $Heading")
+    if ($text -match "(?m)^$escaped\s*$") {
+        Write-Warning "Unmanaged $Heading already exists; preserving project copy: $Agents"
         return
     }
     $updated = $text.TrimEnd() + "`r`n`r`n" + $Policy + "`r`n"
-    if ($DryRun) { Write-Host "[DRY RUN] append policy to $agents" }
-    else { Write-Utf8NoBom $agents $updated; Write-Host "Appended managed policy: $agents" }
+    if ($DryRun) { Write-Host "[DRY RUN] append $Heading to $Agents" }
+    else { Write-Utf8NoBom $Agents $updated; Write-Host "Appended managed $Heading: $Agents" }
 }
 
-$policy = Get-CanonicalPolicy
+$criticalStart='<!-- ALBERT-CRITICAL-ENGINEERING-POLICY:START -->'
+$criticalEnd='<!-- ALBERT-CRITICAL-ENGINEERING-POLICY:END -->'
+$routeStart='<!-- ALBERT-EXECUTION-ROUTING-POLICY:START -->'
+$routeEnd='<!-- ALBERT-EXECUTION-ROUTING-POLICY:END -->'
+$critical=Get-CanonicalSection 'Critical engineering policy' $criticalStart $criticalEnd
+$routing=Get-CanonicalSection 'Execution routing policy' $routeStart $routeEnd
+
 $targets = Get-Targets
 if ($targets.Count -eq 0) { throw 'No project targets selected. Use -AllRegisteredProjects or -ProjectPath.' }
 
@@ -115,9 +112,11 @@ foreach ($root in $targets) {
         if (-not $repo) { Write-Warning "Skipping non-Git project: $root"; continue }
         $status = (& git status --short | Out-String).TrimEnd()
         if ($status) { Write-Warning "Project has existing changes; policy sync will only touch AGENTS.md: $repo" }
-        Sync-Policy -Root $repo -Policy $policy
+        $agents=Join-Path $repo 'AGENTS.md'
+        Sync-ManagedSection $agents 'Critical engineering policy' $criticalStart $criticalEnd $critical
+        Sync-ManagedSection $agents 'Execution routing policy' $routeStart $routeEnd $routing
     }
     finally { Pop-Location }
 }
 
-Write-Host 'Albert Critical Engineering Policy sync completed.'
+Write-Host 'Albert Critical Engineering + MANUAL Execution Routing Policy sync completed.'
