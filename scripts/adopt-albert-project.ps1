@@ -47,18 +47,22 @@ try {
         Write-Host "  installed: $skill"
     }
 
-    Write-Host '[4/5] Preparing local Skill Telemetry location'
+    Write-Host '[4/5] Preparing local telemetry and API-gateway scratch locations'
     $analytics = Join-Path $repoRoot '.ai\analytics'
+    $externalApi = Join-Path $repoRoot '.ai\external-api'
     New-Item -ItemType Directory -Force -Path $analytics | Out-Null
+    New-Item -ItemType Directory -Force -Path $externalApi | Out-Null
 
     Push-Location $repoRoot
     try {
         $exclude = (& git rev-parse --git-path info/exclude 2>$null | Out-String).Trim()
         if (-not [IO.Path]::IsPathRooted($exclude)) { $exclude = Join-Path $repoRoot $exclude }
         $exclude = [IO.Path]::GetFullPath($exclude)
-        $rule = '.ai/analytics/'
+        $rules = @('.ai/analytics/','.ai/external-api/')
         $existing = if (Test-Path -LiteralPath $exclude) { @(Get-Content -LiteralPath $exclude) } else { @() }
-        if ($existing -notcontains $rule) { Add-Content -LiteralPath $exclude -Value $rule -Encoding UTF8 }
+        foreach ($rule in $rules) {
+            if ($existing -notcontains $rule) { Add-Content -LiteralPath $exclude -Value $rule -Encoding UTF8 }
+        }
     }
     finally { Pop-Location }
 
@@ -73,7 +77,8 @@ try {
     Write-Host "Repository: $repoRoot"
     Write-Host "Branch:     $branch"
     Write-Host "HEAD:       $head"
-    Write-Host 'Added/preserved: AGENTS.md, Project Brain context, Albert routers, local telemetry path, DevCore registration/context.'
+    Write-Host 'Added/preserved: AGENTS.md, Project Brain context, Albert routers, local telemetry/API scratch paths, DevCore registration/context.'
+    Write-Host 'Execution routing defaults to MANUAL_ONLY; no external API transmission occurs until a provider is explicitly configured.'
     Write-Host 'Third-party development skills remain global and selectively routed; they are not copied into every repository.'
 }
 finally {
