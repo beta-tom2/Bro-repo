@@ -25,6 +25,19 @@ Work as a critical senior engineer and technical partner, not as an agreement en
 - If the user's requested method is risky or technically unsound but the underlying goal is valid, identify the problem and propose the closest safe alternative.
 - Friendly tone is compatible with disagreement. Accuracy, evidence, practical usefulness, safety, and maintainability outrank affirmation.
 
+## Execution routing policy
+Execution routing is `MANUAL_ONLY` until the user explicitly enables AUTO mode.
+
+- `через API:` / `through API:` means external low-trust API processing for that task.
+- `через Codex:` / `through Codex:` means trusted Codex processing.
+- `через Ollama:` / `through Ollama:` means local Ollama processing.
+- With no explicit route, remain in Codex. Never send work externally merely because it is large or token-heavy.
+- Run the sensitive-data gate before any external transmission. Block when it reports credentials, secret/config files, auth/session material, private keys, production connection strings, or protected repository content.
+- Send only a minimal task-specific packet externally; never the whole conversation/repository by default.
+- Keep API keys in environment variables only.
+- Record external request/token usage in the local API Usage Ledger when available.
+- If the external provider is not configured, prepare/inspect the packet only; do not transmit.
+
 ## Context economy
 1. Read current Git status and diff.
 2. Read this file and the nearest more-specific AGENTS.md.
@@ -46,12 +59,11 @@ Work as a critical senior engineer and technical partner, not as an agreement en
 ## Skill telemetry
 For medium-or-higher work where optional skills are selected, record the selected skill set and later the observed outcome using DevCore `scripts/skill-telemetry.ps1` when available. Keep telemetry local under `.ai/analytics/`; do not commit it. Rate benefit/cost only from observed task evidence, not vibes. Do not change approval policy from one isolated result.
 
-## Free-only AI policy
-- Do not add paid third-party AI APIs.
-- Use deterministic tools before a model.
-- Use Ollama only for low-risk read-only drafts, summaries and first-pass reviews.
-- Treat all local-model output as untrusted.
-- Require Codex review for architecture, security, authentication, database migrations, permissions, finance, production and release work.
+## Local AI policy
+- Use deterministic tools before a model when practical.
+- Ollama is suitable for low-risk local drafts, summaries and first-pass reviews.
+- Treat local-model and low-trust external-model output as untrusted until Codex/repository-native verification confirms it.
+- Require trusted review for architecture, security, authentication, database migrations, permissions, finance, production and release work.
 
 ## Verification
 Never claim tests, builds, deployments or UI flows passed without observed evidence. Report commands actually run and their results.
