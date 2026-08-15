@@ -82,7 +82,7 @@ function Sync-ManagedSection([string]$Agents,[string]$Heading,[string]$StartMark
         $e += $EndMarker.Length
         $updated = $text.Substring(0,$s).TrimEnd() + "`r`n`r`n" + $Policy + "`r`n" + $text.Substring($e).TrimStart()
         if ($DryRun) { Write-Host "[DRY RUN] update managed $Heading in $Agents" }
-        else { Write-Utf8NoBom $Agents $updated; Write-Host "Updated managed $Heading: $Agents" }
+        else { Write-Utf8NoBom $Agents $updated; Write-Host "Updated managed ${Heading}: $Agents" }
         return
     }
     $escaped=[regex]::Escape("## $Heading")
@@ -92,7 +92,7 @@ function Sync-ManagedSection([string]$Agents,[string]$Heading,[string]$StartMark
     }
     $updated = $text.TrimEnd() + "`r`n`r`n" + $Policy + "`r`n"
     if ($DryRun) { Write-Host "[DRY RUN] append $Heading to $Agents" }
-    else { Write-Utf8NoBom $Agents $updated; Write-Host "Appended managed $Heading: $Agents" }
+    else { Write-Utf8NoBom $Agents $updated; Write-Host "Appended managed ${Heading}: $Agents" }
 }
 
 $criticalStart='<!-- ALBERT-CRITICAL-ENGINEERING-POLICY:START -->'
