@@ -6,19 +6,54 @@ param(
 
 $ErrorActionPreference = 'Stop'
 
-$normalized = $Task.Trim()
+$normalized = $Task.Trim().ToLowerInvariant()
 $route = 'CODEX'
 $reason = 'No explicit external/local route requested; MANUAL mode defaults to trusted Codex.'
 
-if ($normalized -match '^(?is)\s*(через\s+api|through\s+api|via\s+api)\s*[:\-–—]?') {
+function Test-RoutePrefix {
+    param(
+        [string]$Text,
+        [string[]]$Prefixes
+    )
+    foreach ($prefix in $Prefixes) {
+        if ($Text.StartsWith($prefix)) { return $true }
+    }
+    return $false
+}
+
+$apiPrefixes = @(
+    'через api',
+    'api:',
+    'api ',
+    'through api',
+    'via api'
+)
+
+$ollamaPrefixes = @(
+    'через ollama',
+    'ollama:',
+    'ollama ',
+    'through ollama',
+    'via ollama'
+)
+
+$codexPrefixes = @(
+    'через codex',
+    'codex:',
+    'codex ',
+    'through codex',
+    'via codex'
+)
+
+if (Test-RoutePrefix $normalized $apiPrefixes) {
     $route = 'EXTERNAL_API'
     $reason = 'User explicitly requested external API processing.'
 }
-elseif ($normalized -match '^(?is)\s*(через\s+ollama|through\s+ollama|via\s+ollama)\s*[:\-–—]?') {
+elseif (Test-RoutePrefix $normalized $ollamaPrefixes) {
     $route = 'OLLAMA'
     $reason = 'User explicitly requested local Ollama processing.'
 }
-elseif ($normalized -match '^(?is)\s*(через\s+codex|through\s+codex|via\s+codex)\s*[:\-–—]?') {
+elseif (Test-RoutePrefix $normalized $codexPrefixes) {
     $route = 'CODEX'
     $reason = 'User explicitly requested trusted Codex processing.'
 }
