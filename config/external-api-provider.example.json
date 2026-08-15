@@ -1,0 +1,18 @@
+{
+  "mode": "MANUAL_ONLY",
+  "status": "NOT_CONFIGURED",
+  "provider_name": "replace-me",
+  "base_url": "https://replace-me.example/v1",
+  "api_key_env": "ALBERT_EXTERNAL_API_KEY",
+  "wire_api": "responses",
+  "default_model": "replace-me",
+  "supports_usage": false,
+  "usage_endpoint": "",
+  "vendor_multiplier": 1.0,
+  "limits": {
+    "rpm": null,
+    "tpm": null,
+    "context_tokens": null
+  },
+  "notes": "Copy to an untracked local config only after provider details are verified. Never put the API key in this file."
+}
