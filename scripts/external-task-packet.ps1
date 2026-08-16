@@ -9,7 +9,6 @@ param(
 )
 
 $ErrorActionPreference='Stop'
-$DevCoreRoot=Split-Path -Parent $PSScriptRoot
 $Gate=Join-Path $PSScriptRoot 'sensitive-data-gate.ps1'
 if (-not (Test-Path -LiteralPath $Gate)) { throw "Sensitive data gate not found: $Gate" }
 
@@ -42,12 +41,12 @@ $head=(& git -C $root rev-parse HEAD | Out-String).Trim()
 $lines=New-Object Collections.Generic.List[string]
 $lines.Add('# External API task packet')
 $lines.Add('')
-$lines.Add('> LOCAL PREVIEW ONLY — external transmission is disabled until a provider is configured and the user explicitly requests API execution.')
+$lines.Add('> LOW-TRUST EXTERNAL BOUNDARY: this packet was created only after explicit external routing and a local sensitive-data check.')
 $lines.Add('')
 $lines.Add("Project: $(Split-Path $root -Leaf)")
 $lines.Add("Branch: $branch")
 $lines.Add("HEAD: $head")
-$lines.Add('Route: EXTERNAL_API (explicit user request required)')
+$lines.Add('Route: EXTERNAL_API (explicit user request)')
 $lines.Add('')
 $lines.Add('## Task')
 $lines.Add($Task)
@@ -65,13 +64,13 @@ foreach ($relative in @($Files | Where-Object { $_ })) {
 }
 $lines.Add('')
 $lines.Add('## External boundary')
-$lines.Add('- Do not infer or request unrelated repository context.')
+$lines.Add('- Use only the task and selected file content in this packet.')
+$lines.Add('- Do not request unrelated repository or conversation context.')
 $lines.Add('- Do not request secrets, credentials, production access, GitHub/Supabase shell access, or external tools.')
 $lines.Add('- Return analysis/text only unless the task explicitly requests a patch or code output.')
-$lines.Add('- The trusted Codex environment remains responsible for applying and verifying any returned change.')
+$lines.Add('- The trusted Codex environment remains responsible for applying and verifying returned changes.')
 
 $parent=Split-Path -Parent $OutputPath
 if ($parent -and -not (Test-Path $parent)) { New-Item -ItemType Directory -Force -Path $parent | Out-Null }
 [IO.File]::WriteAllText($OutputPath,($lines -join [Environment]::NewLine),(New-Object Text.UTF8Encoding($false)))
 Write-Host "External task packet prepared locally: $OutputPath"
-Write-Host 'Transmission status: DISABLED / provider NOT_CONFIGURED'
