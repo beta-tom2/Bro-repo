@@ -32,19 +32,19 @@ function Resolve-RepoRoot([string]$Path) {
 }
 
 function Get-DefaultProviderConfigPath {
-    $home=$env:USERPROFILE
-    if (-not $home) { $home=$HOME }
-    if (-not $home) { throw 'Cannot determine user home for provider config.' }
-    return Join-Path $home '.albert-devcore\external-api-provider.json'
+    $userHome=$env:USERPROFILE
+    if (-not $userHome) { $userHome=$HOME }
+    if (-not $userHome) { throw 'Cannot determine user home for provider config.' }
+    return Join-Path $userHome '.albert-devcore\external-api-provider.json'
 }
 
 function Import-KeyFromCodexEnv([string]$EnvName) {
     $existing=[Environment]::GetEnvironmentVariable($EnvName,'Process')
     if ($existing) { return $existing }
-    $home=$env:USERPROFILE
-    if (-not $home) { $home=$HOME }
-    if (-not $home) { return $null }
-    $dotenv=Join-Path $home '.codex\.env'
+    $userHome=$env:USERPROFILE
+    if (-not $userHome) { $userHome=$HOME }
+    if (-not $userHome) { return $null }
+    $dotenv=Join-Path $userHome '.codex\.env'
     if (-not (Test-Path -LiteralPath $dotenv)) { return $null }
     foreach ($line in Get-Content -LiteralPath $dotenv) {
         if (-not $line) { continue }
