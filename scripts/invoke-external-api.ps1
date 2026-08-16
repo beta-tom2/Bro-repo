@@ -146,12 +146,14 @@ if ($config.http_headers) {
     }
 }
 
-$body=[ordered]@{
-    model=$Model
-    input=$packet
+# Use a plain PSCustomObject rather than OrderedDictionary here. Windows PowerShell
+# 5.1 has a known brittle ConvertTo-Json path for some ordered collections/strings.
+$body=[pscustomobject]@{
+    model=[string]$Model
+    input=[string]$packet
     store=$false
 }
-$bodyJson=$body | ConvertTo-Json -Depth 8
+$bodyJson=ConvertTo-Json -InputObject $body -Depth 4 -Compress
 $watch=[Diagnostics.Stopwatch]::StartNew()
 try {
     $response=Invoke-RestMethod -Uri $uri -Method Post -Headers $headers -Body $bodyJson -TimeoutSec $TimeoutSec
