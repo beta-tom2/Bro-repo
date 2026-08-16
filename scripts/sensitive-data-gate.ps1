@@ -19,10 +19,16 @@ function Resolve-RepoRoot([string]$Path) {
 }
 
 $root=Resolve-RepoRoot $ProjectPath
-$findings=New-Object Collections.Generic.List[object]
+# Use a plain ArrayList for Windows PowerShell 5.1 compatibility.
+$findings=New-Object System.Collections.ArrayList
 
 function Add-Finding([string]$Kind,[string]$Location,[string]$Detail) {
-    $findings.Add([pscustomobject]@{ kind=$Kind; location=$Location; detail=$Detail })
+    $finding=[pscustomobject]@{
+        kind=$Kind
+        location=$Location
+        detail=$Detail
+    }
+    [void]$script:findings.Add($finding)
 }
 
 $blockedNames='(?i)(^|[\\/])(\.env($|\.)|.*\.(pem|p12|pfx|key)$|credentials?\.(json|ya?ml|toml)$|secrets?\.(json|ya?ml|toml)$)'
@@ -61,7 +67,7 @@ foreach ($relative in @($Files | Where-Object { $_ })) {
 $result=[ordered]@{
     safeForExternal = ($findings.Count -eq 0)
     findingCount = $findings.Count
-    findings = @($findings)
+    findings = @($findings.ToArray())
     policy = 'Block external transmission when any finding exists; user must sanitize or narrow the packet.'
 }
 $result | ConvertTo-Json -Depth 6
