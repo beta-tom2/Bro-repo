@@ -21,8 +21,19 @@ function Test-RoutePrefix {
     return $false
 }
 
+# Windows PowerShell 5.1 reads UTF-8-without-BOM script files as the active ANSI
+# code page. Keep this file ASCII-only and construct the Russian prefix at runtime
+# so manual routing remains Unicode-safe regardless of repository file encoding.
+$throughRu = -join @(
+    [char]0x0447, # ch
+    [char]0x0435, # e
+    [char]0x0440, # r
+    [char]0x0435, # e
+    [char]0x0437  # z
+)
+
 $apiPrefixes = @(
-    'через api',
+    ($throughRu + ' api'),
     'api:',
     'api ',
     'through api',
@@ -30,7 +41,7 @@ $apiPrefixes = @(
 )
 
 $ollamaPrefixes = @(
-    'через ollama',
+    ($throughRu + ' ollama'),
     'ollama:',
     'ollama ',
     'through ollama',
@@ -38,7 +49,7 @@ $ollamaPrefixes = @(
 )
 
 $codexPrefixes = @(
-    'через codex',
+    ($throughRu + ' codex'),
     'codex:',
     'codex ',
     'through codex',
