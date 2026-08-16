@@ -6,11 +6,11 @@ param(
 )
 
 $ErrorActionPreference='Stop'
-$home=$env:USERPROFILE
-if (-not $home) { $home=$HOME }
-if (-not $home) { throw 'Cannot determine user home.' }
+$userHome=$env:USERPROFILE
+if (-not $userHome) { $userHome=$HOME }
+if (-not $userHome) { throw 'Cannot determine user home.' }
 
-$dir=Join-Path $home '.albert-devcore'
+$dir=Join-Path $userHome '.albert-devcore'
 $path=Join-Path $dir 'external-api-provider.json'
 if ((Test-Path -LiteralPath $path) -and -not $Force) {
     throw "Provider config already exists: $path. Re-run with -Force only if you intentionally want to replace it."
