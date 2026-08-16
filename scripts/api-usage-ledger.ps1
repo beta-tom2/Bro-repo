@@ -42,7 +42,7 @@ if ($Action -eq 'record') {
     $vendorUnits=[math]::Round(($rawTokens*$VendorMultiplier),2)
     $branch=(& git -C $root branch --show-current | Out-String).Trim()
     $head=(& git -C $root rev-parse HEAD | Out-String).Trim()
-    $entry=[ordered]@{
+    $entry=[pscustomobject]@{
         timestamp=(Get-Date -Format o)
         project=(Split-Path $root -Leaf)
         branch=$branch
@@ -62,7 +62,7 @@ if ($Action -eq 'record') {
         task=$Task
         notes=$Notes
     }
-    $line=$entry | ConvertTo-Json -Compress -Depth 5
+    $line=ConvertTo-Json -InputObject $entry -Compress -Depth 4
     [IO.File]::AppendAllText($path,($line+[Environment]::NewLine),(New-Object Text.UTF8Encoding($false)))
     Write-Host "Recorded API usage: $path"
     return
@@ -77,10 +77,15 @@ foreach ($line in Get-Content -LiteralPath $path) {
     if (-not $line.Trim()) { continue }
     try { $rows += ($line | ConvertFrom-Json) } catch { }
 }
+if (@($rows).Count -eq 0) {
+    Write-Host 'API usage ledger exists but contains no readable records.'
+    return
+}
 $groups=$rows | Group-Object provider,model
+$summaryRows=@()
 foreach ($group in $groups) {
     $items=@($group.Group)
-    [pscustomobject]@{
+    $summaryRows += [pscustomobject]@{
         provider=$items[0].provider
         model=$items[0].model
         requests=($items | Measure-Object requests -Sum).Sum
@@ -90,8 +95,9 @@ foreach ($group in $groups) {
         cached_tokens=($items | Measure-Object cached_tokens -Sum).Sum
         raw_tokens=($items | Measure-Object raw_tokens -Sum).Sum
         vendor_units=($items | Measure-Object vendor_units -Sum).Sum
-        completed=@($items | Where-Object outcome -eq 'completed').Count
-        failed=@($items | Where-Object outcome -eq 'failed').Count
-        blocked=@($items | Where-Object outcome -eq 'blocked').Count
+        completed=@($items | Where-Object { $_.outcome -eq 'completed' }).Count
+        failed=@($items | Where-Object { $_.outcome -eq 'failed' }).Count
+        blocked=@($items | Where-Object { $_.outcome -eq 'blocked' }).Count
     }
-} | Format-Table -AutoSize
+}
+$summaryRows | Format-Table -AutoSize
